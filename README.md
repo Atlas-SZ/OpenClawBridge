@@ -93,6 +93,8 @@ cp connector/config.example.json /etc/openclaw-bridge/connector.json
 - `access_code`：给用户客户端使用的授权码
 - `gateway.url`：本地 Gateway 地址
 - `gateway.auth.token`：OpenClaw operator token
+- `gateway.min_protocol` / `gateway.max_protocol`：Gateway 协议版本（默认 `3/3`）
+- `gateway.scopes`：默认 `["operator.read","operator.write"]`
 
 启动 Connector：
 
@@ -194,6 +196,13 @@ go build -o /tmp/openclaw-cli ./cli
 
 - `gateway.auth.token` 无效或为空
 - Connector 按设计会直接退出（fail-fast）
+
+### `gateway connect failed: protocol mismatch`
+
+- Gateway 协议版本不匹配
+- 调整 `/etc/openclaw-bridge/connector.json` 中：
+  - `gateway.min_protocol`
+  - `gateway.max_protocol`
 
 ### `GATEWAY_NOT_READY`
 

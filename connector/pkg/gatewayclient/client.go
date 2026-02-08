@@ -252,15 +252,24 @@ func (c *Client) performConnect(conn *websocket.Conn) error {
 		"id":     reqID,
 		"method": "connect",
 		"params": map[string]any{
+			"minProtocol": c.cfg.MinProtocol,
+			"maxProtocol": c.cfg.MaxProtocol,
 			"auth": map[string]any{
 				"token": c.cfg.Auth.Token,
 			},
 			"client": map[string]any{
-				"id":          c.cfg.Client.ID,
-				"displayName": c.cfg.Client.DisplayName,
-				"role":        "operator",
+				"id":       c.cfg.Client.ID,
+				"version":  c.cfg.Client.Version,
+				"platform": c.cfg.Client.Platform,
+				"mode":     c.cfg.Client.Mode,
 			},
-			"caps": map[string]any{},
+			"role":        "operator",
+			"scopes":      c.cfg.Scopes,
+			"caps":        []any{},
+			"commands":    []any{},
+			"permissions": map[string]any{},
+			"locale":      c.cfg.Locale,
+			"userAgent":   c.cfg.UserAgent,
 		},
 	}
 
