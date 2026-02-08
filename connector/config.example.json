@@ -1,0 +1,24 @@
+{
+  "relay_url": "ws://127.0.0.1:8080/tunnel",
+  "access_code": "A-123456",
+  "generation": 1,
+  "caps": {
+    "e2ee": false
+  },
+  "reconnect_seconds": 2,
+  "gateway": {
+    "url": "ws://127.0.0.1:18789",
+    "auth": {
+      "token": "GATEWAY_AUTH_TOKEN"
+    },
+    "client": {
+      "id": "bridge-connector",
+      "displayName": "OpenClaw Bridge Connector"
+    },
+    "challenge_timeout_seconds": 8,
+    "reconnect_initial_seconds": 1,
+    "reconnect_max_seconds": 30,
+    "send_method": "send",
+    "cancel_method": "cancel"
+  }
+}

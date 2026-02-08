@@ -1,0 +1,31 @@
+# OS
+.DS_Store
+
+# Go
+bin/
+*.test
+*.out
+coverage.out
+
+# Local build/mod caches
+.gocache/
+.gomodcache/
+
+# IDE
+.vscode/
+.idea/
+
+# Local configs / secrets
+connector/config.json
+*.local
+*.local.*
+.env
+.env.*
+
+# Logs
+*.log
+
+# Local planning artifacts
+task_plan.md
+findings.md
+progress.md
