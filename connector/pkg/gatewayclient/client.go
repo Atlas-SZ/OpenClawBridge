@@ -135,11 +135,12 @@ func (c *Client) SendUserMessage(sessionID, content string) error {
 
 func (c *Client) buildSendParams(reqID, content string) (map[string]any, error) {
 	if requiresAddressedMessage(c.cfg.SendMethod) {
-		if strings.TrimSpace(c.cfg.SendTo) == "" {
-			return nil, fmt.Errorf("gateway.send_to is required when send_method=%s", c.cfg.SendMethod)
+		to := strings.TrimSpace(c.cfg.SendTo)
+		if to == "" {
+			to = "remote"
 		}
 		return map[string]any{
-			"to":             c.cfg.SendTo,
+			"to":             to,
 			"message":        content,
 			"idempotencyKey": reqID,
 		}, nil

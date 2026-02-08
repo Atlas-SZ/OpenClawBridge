@@ -27,7 +27,7 @@
     "reconnect_initial_seconds": 1,
     "reconnect_max_seconds": 30,
     "send_method": "send",
-    "send_to": "TARGET_ID_OR_CHANNEL",
+    "send_to": "remote",
     "cancel_method": "cancel"
   }
 }

@@ -94,7 +94,7 @@ v0.1 uses JSON event payload for text chat.
 - Connector waits for `connect.challenge`, then sends `connect` as `role=operator`.
 - `user_message` -> Gateway request (`gateway.send_method`, default `send`).
   - If method is `send`/`*.send`, params are:
-    - `to` from `gateway.send_to`
+    - `to` from `gateway.send_to` (default `remote`)
     - `message` from event `content`
     - `idempotencyKey` generated per request
 - `control.stop` -> Gateway request (`gateway.cancel_method`, default `cancel`).

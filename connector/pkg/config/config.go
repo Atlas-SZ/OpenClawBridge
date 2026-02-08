@@ -118,6 +118,9 @@ func Load(path string) (Config, error) {
 	if cfg.Gateway.SendMethod == "" {
 		cfg.Gateway.SendMethod = "send"
 	}
+	if cfg.Gateway.SendTo == "" {
+		cfg.Gateway.SendTo = "remote"
+	}
 	if cfg.Gateway.CancelMethod == "" {
 		cfg.Gateway.CancelMethod = "cancel"
 	}

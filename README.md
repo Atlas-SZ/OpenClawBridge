@@ -108,7 +108,7 @@ cp connector/config.example.json /etc/openclaw-bridge/connector.json
 如果你的 Gateway 方法名不是默认值，调整：
 
 - `gateway.send_method`（默认 `send`）
-- `gateway.send_to`（`send` 方法需要，填写 OpenClaw 目标 ID/通道）
+- `gateway.send_to`（可选，默认 `remote`，仅当你的 Gateway 需要其他目标时再改）
 - `gateway.cancel_method`（默认 `cancel`）
 
 ### B. 中继侧（中继服务器）
@@ -184,7 +184,7 @@ systemctl status openclaw-bridge-connector
       "id": "bridge-connector",
       "displayName": "OpenClaw Bridge Connector"
     },
-    "send_to": "TARGET_ID_OR_CHANNEL"
+    "send_to": "remote"
   }
 }
 ```
@@ -233,7 +233,8 @@ go build -o /tmp/openclaw-cli ./cli
 ### `invalid send params`（缺少 `to/message/idempotencyKey`）
 
 - 你的 Gateway `send` 协议要求地址化参数
-- 在 `/etc/openclaw-bridge/connector.json` 增加 `gateway.send_to`
+- Connector 已自动发送 `to/message/idempotencyKey`
+- 如目标不是默认 `remote`，再在 `/etc/openclaw-bridge/connector.json` 覆盖 `gateway.send_to`
 
 ## Protocol & Boundaries
 
