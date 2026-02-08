@@ -2,7 +2,10 @@ param(
   [string]$Addr = ":8080"
 )
 
-$binPath = Join-Path $PSScriptRoot "..\bin\openclaw-relay.exe"
+$binPath = Join-Path $PSScriptRoot "openclaw-relay.exe"
+if (-not (Test-Path $binPath)) {
+  $binPath = Join-Path $PSScriptRoot "..\bin\openclaw-relay.exe"
+}
 if (-not (Test-Path $binPath)) {
   Write-Error "openclaw-relay.exe not found: $binPath"
   exit 1

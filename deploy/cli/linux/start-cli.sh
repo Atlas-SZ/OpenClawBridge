@@ -4,7 +4,7 @@ set -euo pipefail
 usage() {
   cat <<'USAGE'
 Usage:
-  ./cli/scripts/start-cli.sh <relay-url> <access-code> [response-timeout]
+  ./start-cli.sh <relay-url> <access-code> [response-timeout]
 USAGE
 }
 
@@ -23,7 +23,10 @@ if [[ -z "${RELAY_URL}" || -z "${ACCESS_CODE}" ]]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CLI_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
-BIN_PATH="${CLI_DIR}/bin/openclaw-cli"
+if [[ -x "${SCRIPT_DIR}/openclaw-cli" ]]; then
+  BIN_PATH="${SCRIPT_DIR}/openclaw-cli"
+else
+  BIN_PATH="${SCRIPT_DIR}/../bin/openclaw-cli"
+fi
 
 exec "${BIN_PATH}" -relay-url "${RELAY_URL}" -access-code "${ACCESS_CODE}" -response-timeout "${RESPONSE_TIMEOUT}"

@@ -65,28 +65,39 @@ jobs:
           pkg="openclaw-bridge-${{ matrix.goos }}-${{ matrix.goarch }}"
           root="package/${pkg}"
 
-          mkdir -p "${root}/relay/bin" "${root}/relay/scripts"
-          mkdir -p "${root}/connector/bin" "${root}/connector/scripts" "${root}/connector/config"
-          mkdir -p "${root}/cli/bin" "${root}/cli/scripts"
+          mkdir -p "${root}/relay/config/nginx" "${root}/relay/config/systemd"
+          mkdir -p "${root}/connector/config/systemd"
+          mkdir -p "${root}/cli"
 
-          cp dist/openclaw-relay${{ matrix.ext }} "${root}/relay/bin/openclaw-relay"
-          cp dist/openclaw-connector${{ matrix.ext }} "${root}/connector/bin/openclaw-connector"
-          cp dist/openclaw-cli${{ matrix.ext }} "${root}/cli/bin/openclaw-cli"
+          cp dist/openclaw-relay${{ matrix.ext }} "${root}/relay/openclaw-relay"
+          cp dist/openclaw-connector${{ matrix.ext }} "${root}/connector/openclaw-connector"
+          cp dist/openclaw-cli${{ matrix.ext }} "${root}/cli/openclaw-cli"
           cp connector/config.example.json "${root}/connector/config/connector.json.example"
+          cp deploy/nginx/openclaw-bridge.conf "${root}/relay/config/nginx/"
+          cp deploy/systemd/openclaw-bridge-relay.service "${root}/relay/config/systemd/"
+          cp deploy/systemd/openclaw-bridge-connector.service "${root}/connector/config/systemd/"
           cp README.md LICENSE "${root}/"
 
           if [[ '${{ matrix.goos }}' == 'linux' ]]; then
-            mkdir -p "${root}/relay/systemd" "${root}/relay/nginx" "${root}/connector/systemd"
-            cp deploy/systemd/openclaw-bridge-relay.service "${root}/relay/systemd/"
-            cp deploy/systemd/openclaw-bridge-connector.service "${root}/connector/systemd/"
-            cp deploy/nginx/openclaw-bridge.conf "${root}/relay/nginx/"
-            cp deploy/relay/linux/*.sh "${root}/relay/scripts/"
-            cp deploy/connector/linux/*.sh "${root}/connector/scripts/"
-            cp deploy/cli/linux/*.sh "${root}/cli/scripts/"
+            cp deploy/relay/linux/run-relay.sh "${root}/relay/start-relay.sh"
+            cp deploy/relay/linux/install-relay-service.sh "${root}/relay/install-relay-service.sh"
+            cp deploy/relay/linux/uninstall-relay-service.sh "${root}/relay/uninstall-relay.sh"
+
+            cp deploy/connector/linux/run-connector.sh "${root}/connector/start-connector.sh"
+            cp deploy/connector/linux/install-connector-service.sh "${root}/connector/install-connector-service.sh"
+            cp deploy/connector/linux/uninstall-connector-service.sh "${root}/connector/uninstall-connector.sh"
+
+            cp deploy/cli/linux/start-cli.sh "${root}/cli/start-cli.sh"
+            cp deploy/cli/linux/uninstall-cli.sh "${root}/cli/uninstall-cli.sh"
           else
-            cp deploy/relay/macos/*.sh "${root}/relay/scripts/"
-            cp deploy/connector/macos/*.sh "${root}/connector/scripts/"
-            cp deploy/cli/macos/*.sh "${root}/cli/scripts/"
+            cp deploy/relay/macos/run-relay.sh "${root}/relay/start-relay.sh"
+            cp deploy/relay/macos/uninstall-relay.sh "${root}/relay/uninstall-relay.sh"
+
+            cp deploy/connector/macos/run-connector.sh "${root}/connector/start-connector.sh"
+            cp deploy/connector/macos/uninstall-connector.sh "${root}/connector/uninstall-connector.sh"
+
+            cp deploy/cli/macos/start-cli.sh "${root}/cli/start-cli.sh"
+            cp deploy/cli/macos/uninstall-cli.sh "${root}/cli/uninstall-cli.sh"
           fi
 
           find "${root}" -type f -name "*.sh" -exec chmod +x {} +
@@ -111,24 +122,35 @@ jobs:
           $pkg = "openclaw-bridge-${{ matrix.goos }}-${{ matrix.goarch }}"
           $root = "package/$pkg"
 
-          New-Item -ItemType Directory -Path "$root/relay/bin" -Force | Out-Null
-          New-Item -ItemType Directory -Path "$root/relay/scripts" -Force | Out-Null
-          New-Item -ItemType Directory -Path "$root/connector/bin" -Force | Out-Null
-          New-Item -ItemType Directory -Path "$root/connector/scripts" -Force | Out-Null
-          New-Item -ItemType Directory -Path "$root/connector/config" -Force | Out-Null
-          New-Item -ItemType Directory -Path "$root/cli/bin" -Force | Out-Null
-          New-Item -ItemType Directory -Path "$root/cli/scripts" -Force | Out-Null
+          New-Item -ItemType Directory -Path "$root/relay/config/nginx" -Force | Out-Null
+          New-Item -ItemType Directory -Path "$root/relay/config/systemd" -Force | Out-Null
+          New-Item -ItemType Directory -Path "$root/connector/config/systemd" -Force | Out-Null
+          New-Item -ItemType Directory -Path "$root/cli" -Force | Out-Null
 
-          Copy-Item "dist/openclaw-relay${{ matrix.ext }}" "$root/relay/bin/openclaw-relay.exe"
-          Copy-Item "dist/openclaw-connector${{ matrix.ext }}" "$root/connector/bin/openclaw-connector.exe"
-          Copy-Item "dist/openclaw-cli${{ matrix.ext }}" "$root/cli/bin/openclaw-cli.exe"
+          Copy-Item "dist/openclaw-relay${{ matrix.ext }}" "$root/relay/openclaw-relay.exe"
+          Copy-Item "dist/openclaw-connector${{ matrix.ext }}" "$root/connector/openclaw-connector.exe"
+          Copy-Item "dist/openclaw-cli${{ matrix.ext }}" "$root/cli/openclaw-cli.exe"
           Copy-Item "connector/config.example.json" "$root/connector/config/connector.json.example"
+          Copy-Item "deploy/nginx/openclaw-bridge.conf" "$root/relay/config/nginx/"
+          Copy-Item "deploy/systemd/openclaw-bridge-relay.service" "$root/relay/config/systemd/"
+          Copy-Item "deploy/systemd/openclaw-bridge-connector.service" "$root/connector/config/systemd/"
           Copy-Item "README.md" "$root/"
           Copy-Item "LICENSE" "$root/"
 
-          Copy-Item "deploy/relay/windows/*" "$root/relay/scripts/"
-          Copy-Item "deploy/connector/windows/*" "$root/connector/scripts/"
-          Copy-Item "deploy/cli/windows/*" "$root/cli/scripts/"
+          Copy-Item "deploy/relay/windows/run-relay.cmd" "$root/relay/start-relay.cmd"
+          Copy-Item "deploy/relay/windows/run-relay.ps1" "$root/relay/start-relay.ps1"
+          Copy-Item "deploy/relay/windows/uninstall-relay.cmd" "$root/relay/uninstall-relay.cmd"
+          Copy-Item "deploy/relay/windows/uninstall-relay.ps1" "$root/relay/uninstall-relay.ps1"
+
+          Copy-Item "deploy/connector/windows/run-connector.cmd" "$root/connector/start-connector.cmd"
+          Copy-Item "deploy/connector/windows/run-connector.ps1" "$root/connector/start-connector.ps1"
+          Copy-Item "deploy/connector/windows/uninstall-connector.cmd" "$root/connector/uninstall-connector.cmd"
+          Copy-Item "deploy/connector/windows/uninstall-connector.ps1" "$root/connector/uninstall-connector.ps1"
+
+          Copy-Item "deploy/cli/windows/start-cli.cmd" "$root/cli/start-cli.cmd"
+          Copy-Item "deploy/cli/windows/start-cli.ps1" "$root/cli/start-cli.ps1"
+          Copy-Item "deploy/cli/windows/uninstall-cli.cmd" "$root/cli/uninstall-cli.cmd"
+          Copy-Item "deploy/cli/windows/uninstall-cli.ps1" "$root/cli/uninstall-cli.ps1"
 
           Compress-Archive -Path "$root/*" -DestinationPath "dist/$pkg.zip" -Force
 

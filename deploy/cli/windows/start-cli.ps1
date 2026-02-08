@@ -4,7 +4,10 @@ param(
   [string]$ResponseTimeout = "30s"
 )
 
-$binPath = Join-Path $PSScriptRoot "..\bin\openclaw-cli.exe"
+$binPath = Join-Path $PSScriptRoot "openclaw-cli.exe"
+if (-not (Test-Path $binPath)) {
+  $binPath = Join-Path $PSScriptRoot "..\bin\openclaw-cli.exe"
+}
 if (-not (Test-Path $binPath)) {
   Write-Error "openclaw-cli.exe not found: $binPath"
   exit 1

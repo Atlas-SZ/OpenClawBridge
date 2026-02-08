@@ -120,45 +120,38 @@ go run ./cli -relay-url wss://YOUR_RELAY_DOMAIN/client -access-code A-123456 -re
 
 ## Release 包内容
 
-自动打包的每个平台压缩包都按角色拆分为三个目录：`relay/`、`connector/`、`cli/`。
+自动打包的压缩包结构（所有平台统一）：
 
-目录结构示例（Linux/macOS）：
+- 第一层按功能拆分：`relay/`、`connector/`、`cli/`
+- 每个功能目录内放：
+  - 该功能对应的二进制
+  - 启动与卸载脚本
+  - `config/`（该功能相关配置与服务文件）
+
+目录结构示例：
 
 ```text
 openclaw-bridge-<platform>/
 ├── relay/
-│   ├── bin/openclaw-relay
-│   ├── scripts/... (平台脚本)
-│   ├── systemd/... (仅 Linux)
-│   └── nginx/openclaw-bridge.conf (仅 Linux)
+│   ├── openclaw-relay(.exe)
+│   ├── start-relay.*
+│   ├── uninstall-relay.*
+│   └── config/
+│       ├── nginx/openclaw-bridge.conf
+│       └── systemd/openclaw-bridge-relay.service
 ├── connector/
-│   ├── bin/openclaw-connector
-│   ├── config/connector.json.example
-│   ├── scripts/... (平台脚本)
-│   └── systemd/... (仅 Linux)
+│   ├── openclaw-connector(.exe)
+│   ├── start-connector.*
+│   ├── install-connector-service.sh (Linux)
+│   ├── uninstall-connector.*
+│   └── config/
+│       ├── connector.json.example
+│       └── systemd/openclaw-bridge-connector.service
 └── cli/
-    ├── bin/openclaw-cli
-    └── scripts/... (平台脚本)
+    ├── openclaw-cli(.exe)
+    ├── start-cli.*
+    └── uninstall-cli.*
 ```
-
-目录结构示例（Windows）：
-
-```text
-openclaw-bridge-windows-amd64/
-├── relay/bin/openclaw-relay.exe
-├── relay/scripts/run-relay.* + uninstall-relay.*
-├── connector/bin/openclaw-connector.exe
-├── connector/config/connector.json.example
-├── connector/scripts/run-connector.* + uninstall-connector.*
-├── cli/bin/openclaw-cli.exe
-└── cli/scripts/start-cli.* + uninstall-cli.*
-```
-
-每个角色目录下都包含平台对应的 `run/start` 与 `uninstall` 脚本：
-
-- `relay/scripts/`：启动与卸载 relay
-- `connector/scripts/`：启动与卸载 connector
-- `cli/scripts/`：启动与卸载 cli
 
 ## 可选：systemd 常驻运行
 

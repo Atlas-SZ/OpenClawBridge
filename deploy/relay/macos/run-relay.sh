@@ -3,7 +3,13 @@ set -euo pipefail
 
 ADDR="${ADDR:-:8080}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-RELAY_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
-BIN="${BIN:-${RELAY_DIR}/bin/openclaw-relay}"
 
-exec "${BIN}" -addr "${ADDR}"
+if [[ -n "${BIN:-}" ]]; then
+  BIN_PATH="${BIN}"
+elif [[ -x "${SCRIPT_DIR}/openclaw-relay" ]]; then
+  BIN_PATH="${SCRIPT_DIR}/openclaw-relay"
+else
+  BIN_PATH="${SCRIPT_DIR}/../bin/openclaw-relay"
+fi
+
+exec "${BIN_PATH}" -addr "${ADDR}"

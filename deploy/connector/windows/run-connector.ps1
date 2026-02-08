@@ -3,10 +3,16 @@ param(
 )
 
 if ($Config -eq "") {
+  $Config = Join-Path $PSScriptRoot "config\connector.json"
+}
+if (-not (Test-Path $Config)) {
   $Config = Join-Path $PSScriptRoot "..\config\connector.json"
 }
 
-$binPath = Join-Path $PSScriptRoot "..\bin\openclaw-connector.exe"
+$binPath = Join-Path $PSScriptRoot "openclaw-connector.exe"
+if (-not (Test-Path $binPath)) {
+  $binPath = Join-Path $PSScriptRoot "..\bin\openclaw-connector.exe"
+}
 if (-not (Test-Path $binPath)) {
   Write-Error "openclaw-connector.exe not found: $binPath"
   exit 1
@@ -14,7 +20,7 @@ if (-not (Test-Path $binPath)) {
 
 if (-not (Test-Path $Config)) {
   Write-Error "config not found: $Config"
-  Write-Host "Copy connector.json.example to connector.json and edit it first."
+  Write-Host "Copy config\\connector.json.example to config\\connector.json and edit it first."
   exit 1
 }
 

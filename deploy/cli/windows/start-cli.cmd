@@ -12,7 +12,8 @@ if "%RELAY_URL%"=="" goto usage
 if "%ACCESS_CODE%"=="" goto usage
 if "%RESPONSE_TIMEOUT%"=="" set "RESPONSE_TIMEOUT=30s"
 
-set "BIN_PATH=%~dp0..\bin\openclaw-cli.exe"
+set "BIN_PATH=%~dp0openclaw-cli.exe"
+if not exist "%BIN_PATH%" set "BIN_PATH=%~dp0..\bin\openclaw-cli.exe"
 if not exist "%BIN_PATH%" (
   echo openclaw-cli not found: %BIN_PATH%
   exit /b 1
