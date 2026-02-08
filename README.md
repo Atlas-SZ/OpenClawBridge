@@ -96,6 +96,7 @@ mkdir -p /etc/openclaw-bridge
     },
     "scopes": ["operator.read", "operator.write"],
     "send_method": "agent",
+    "send_method_fallbacks": ["chat.send"],
     "cancel_method": "chat.abort"
   }
 }
@@ -236,7 +237,7 @@ journalctl --user -u openclaw-gateway.service -n 80 --no-pager
 
 - `Gateway auth failed`：`gateway.auth.token` 与 Gateway 配置不一致。
 - `missing scope: operator.admin`：Connector 会自动尝试补 admin scope；若仍失败，说明 token 本身无该权限。
-- `unknown method ...`：`send_method` 拼写错误，推荐保持 `agent`。
+- `unknown method ...` 或 `invalid send params ...`：打开方法回退，推荐 `send_method=agent` 且 `send_method_fallbacks=["chat.send"]`，由 Connector 自动兼容不同 Gateway 方法。
 - `websocket: close 1009 (message too big)`：请求包超过 Nginx 或 Gateway 限制；请在 Nginx/Gateway 侧调整允许的消息大小。
 - 发送后长时间无返回：用 `-response-timeout` 防止 CLI 无限制等待，并查看 Connector/Gateway 日志。
 

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"openclaw-bridge/shared/protocol"
 )
@@ -31,6 +32,7 @@ type GatewayConfig struct {
 	ReconnectInitialSeconds int                 `json:"reconnect_initial_seconds"`
 	ReconnectMaxSeconds     int                 `json:"reconnect_max_seconds"`
 	SendMethod              string              `json:"send_method"`
+	SendMethodFallbacks     []string            `json:"send_method_fallbacks"`
 	SendTo                  string              `json:"send_to"`
 	CancelMethod            string              `json:"cancel_method"`
 }
@@ -117,6 +119,18 @@ func Load(path string) (Config, error) {
 	}
 	if cfg.Gateway.SendMethod == "" {
 		cfg.Gateway.SendMethod = "agent"
+	}
+	cfg.Gateway.SendMethod = strings.ToLower(strings.TrimSpace(cfg.Gateway.SendMethod))
+	for i := range cfg.Gateway.SendMethodFallbacks {
+		cfg.Gateway.SendMethodFallbacks[i] = strings.ToLower(strings.TrimSpace(cfg.Gateway.SendMethodFallbacks[i]))
+	}
+	if len(cfg.Gateway.SendMethodFallbacks) == 0 {
+		switch cfg.Gateway.SendMethod {
+		case "agent":
+			cfg.Gateway.SendMethodFallbacks = []string{"chat.send"}
+		case "chat.send":
+			cfg.Gateway.SendMethodFallbacks = []string{"agent"}
+		}
 	}
 	if cfg.Gateway.SendTo == "" {
 		cfg.Gateway.SendTo = "remote"

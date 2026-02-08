@@ -27,6 +27,7 @@
     "reconnect_initial_seconds": 1,
     "reconnect_max_seconds": 30,
     "send_method": "agent",
+    "send_method_fallbacks": ["chat.send"],
     "cancel_method": "chat.abort"
   }
 }

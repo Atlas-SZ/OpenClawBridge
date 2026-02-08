@@ -45,6 +45,16 @@ type Client struct {
 	runMu        sync.RWMutex
 	runToSession map[string]string
 	runLastText  map[string]string
+
+	retryMu      sync.Mutex
+	reqFallbacks map[string]sendFallbackState
+}
+
+type sendFallbackState struct {
+	SessionID string
+	Event     protocol.Event
+	Methods   []string
+	Next      int
 }
 
 type envelope struct {
@@ -77,6 +87,7 @@ func New(cfg config.GatewayConfig, logger *log.Logger, handlers Handlers) *Clien
 		runToReq:     make(map[string]string),
 		runToSession: make(map[string]string),
 		runLastText:  make(map[string]string),
+		reqFallbacks: make(map[string]sendFallbackState),
 	}
 }
 
@@ -121,34 +132,60 @@ func (c *Client) Run(ctx context.Context) error {
 }
 
 func (c *Client) SendUserMessage(sessionID string, event protocol.Event) error {
-	reqID := newID("gw_req_")
-	c.trackRequest(reqID, sessionID)
-
-	params, err := c.buildSendParams(sessionID, reqID, event)
-	if err != nil {
-		c.untrackRequest(reqID)
-		return err
+	methods := c.buildSendMethodAttempts(event)
+	if len(methods) == 0 {
+		return errors.New("send method is empty")
 	}
 
-	msg := map[string]any{
-		"type":   "req",
-		"id":     reqID,
-		"method": c.cfg.SendMethod,
-		"params": params,
+	var lastErr error
+	for idx, method := range methods {
+		reqID := newID("gw_req_")
+		params, err := c.buildSendParams(sessionID, reqID, method, event)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		c.trackRequest(reqID, sessionID)
+		if idx+1 < len(methods) {
+			c.setFallback(reqID, sendFallbackState{
+				SessionID: sessionID,
+				Event:     event,
+				Methods:   methods,
+				Next:      idx + 1,
+			})
+		}
+
+		msg := map[string]any{
+			"type":   "req",
+			"id":     reqID,
+			"method": method,
+			"params": params,
+		}
+
+		if err := c.writeJSON(msg); err != nil {
+			c.untrackRequest(reqID)
+			lastErr = err
+			continue
+		}
+
+		if idx > 0 {
+			c.logger.Printf("gateway send method fallback selected method=%s", method)
+		}
+		return nil
 	}
 
-	if err := c.writeJSON(msg); err != nil {
-		c.untrackRequest(reqID)
-		return err
+	if lastErr != nil {
+		return lastErr
 	}
-	return nil
+	return errors.New("unable to build gateway send request")
 }
 
-func (c *Client) buildSendParams(sessionID, reqID string, event protocol.Event) (map[string]any, error) {
+func (c *Client) buildSendParams(sessionID, reqID, method string, event protocol.Event) (map[string]any, error) {
 	content := strings.TrimSpace(event.Content)
 	attachments := normalizeAttachments(event.Attachments)
 
-	if isAgentMethod(c.cfg.SendMethod) {
+	if isAgentMethod(method) {
 		if content == "" {
 			if len(attachments) > 0 {
 				content = "The image attachment is already included in this request. Analyze it directly and do not ask for file path or URL."
@@ -162,19 +199,19 @@ func (c *Client) buildSendParams(sessionID, reqID string, event protocol.Event) 
 			"idempotencyKey": reqID,
 		}
 		if len(attachments) > 0 {
-			fitted, changed, before, after, err := fitGatewayAttachments(c.cfg.SendMethod, reqID, params, attachments)
+			fitted, changed, before, after, err := fitGatewayAttachments(method, reqID, params, attachments)
 			if err != nil {
 				return nil, err
 			}
 			if changed {
-				c.logger.Printf("gateway attachment auto-compressed method=%s bytes_before=%d bytes_after=%d", c.cfg.SendMethod, before, after)
+				c.logger.Printf("gateway attachment auto-compressed method=%s bytes_before=%d bytes_after=%d", method, before, after)
 			}
 			params["attachments"] = fitted
 		}
 		return params, nil
 	}
 
-	if isChatSendMethod(c.cfg.SendMethod) {
+	if isChatSendMethod(method) {
 		if content == "" && len(attachments) == 0 {
 			return nil, errors.New("content or attachments is required for chat.send method")
 		}
@@ -184,19 +221,19 @@ func (c *Client) buildSendParams(sessionID, reqID string, event protocol.Event) 
 			"idempotencyKey": reqID,
 		}
 		if len(attachments) > 0 {
-			fitted, changed, before, after, err := fitGatewayAttachments(c.cfg.SendMethod, reqID, params, attachments)
+			fitted, changed, before, after, err := fitGatewayAttachments(method, reqID, params, attachments)
 			if err != nil {
 				return nil, err
 			}
 			if changed {
-				c.logger.Printf("gateway attachment auto-compressed method=%s bytes_before=%d bytes_after=%d", c.cfg.SendMethod, before, after)
+				c.logger.Printf("gateway attachment auto-compressed method=%s bytes_before=%d bytes_after=%d", method, before, after)
 			}
 			params["attachments"] = fitted
 		}
 		return params, nil
 	}
 
-	if requiresAddressedMessage(c.cfg.SendMethod) {
+	if requiresAddressedMessage(method) {
 		to := strings.TrimSpace(event.To)
 		if to == "" {
 			to = strings.TrimSpace(c.cfg.SendTo)
@@ -528,6 +565,12 @@ func (c *Client) handleResponse(env envelope) error {
 				if msg == "" || msg == "gateway event error" {
 					msg = "gateway request failed"
 				}
+				if c.trySendFallback(env.ID, msg) {
+					if runID != "" {
+						c.clearRun(runID)
+					}
+					return nil
+				}
 				c.emitEvent(sessionID, protocol.Event{
 					Type:    protocol.EventError,
 					Code:    "GATEWAY_REQUEST_FAILED",
@@ -566,6 +609,9 @@ func (c *Client) handleResponse(env envelope) error {
 	errMsg := extractErrorMessage(env)
 	if isUnauthorized(errMsg) {
 		return fmt.Errorf("%w: %s", ErrGatewayAuthFailed, errMsg)
+	}
+	if c.trySendFallback(env.ID, errMsg) {
+		return nil
 	}
 
 	c.emitEvent(sessionID, protocol.Event{Type: protocol.EventError, Code: "GATEWAY_REQUEST_FAILED", Message: errMsg})
@@ -726,6 +772,56 @@ func (c *Client) emitMediaFromPayload(sessionID string, payload map[string]any) 
 	c.emitEvent(sessionID, protocol.Event{Type: protocol.EventMedia, Media: media})
 }
 
+func (c *Client) trySendFallback(reqID, errMsg string) bool {
+	if !isSendMethodCompatError(errMsg) {
+		return false
+	}
+
+	state, ok := c.popFallback(reqID)
+	if !ok {
+		return false
+	}
+	c.untrackRequest(reqID)
+
+	for i := state.Next; i < len(state.Methods); i++ {
+		method := state.Methods[i]
+		newReqID := newID("gw_req_")
+
+		params, err := c.buildSendParams(state.SessionID, newReqID, method, state.Event)
+		if err != nil {
+			c.logger.Printf("gateway send fallback skip method=%s err=%v", method, err)
+			continue
+		}
+
+		c.trackRequest(newReqID, state.SessionID)
+		if i+1 < len(state.Methods) {
+			c.setFallback(newReqID, sendFallbackState{
+				SessionID: state.SessionID,
+				Event:     state.Event,
+				Methods:   state.Methods,
+				Next:      i + 1,
+			})
+		}
+
+		msg := map[string]any{
+			"type":   "req",
+			"id":     newReqID,
+			"method": method,
+			"params": params,
+		}
+		if err := c.writeJSON(msg); err != nil {
+			c.logger.Printf("gateway send fallback write failed method=%s err=%v", method, err)
+			c.untrackRequest(newReqID)
+			continue
+		}
+
+		c.logger.Printf("gateway send fallback accepted method=%s reason=%s", method, errMsg)
+		return true
+	}
+
+	return false
+}
+
 func (c *Client) writeJSON(v any) error {
 	if !c.IsReady() {
 		return errors.New("gateway not ready")
@@ -755,6 +851,28 @@ func (c *Client) trackRequest(reqID, sessionID string) {
 	c.stateMu.Unlock()
 }
 
+func (c *Client) setFallback(reqID string, state sendFallbackState) {
+	c.retryMu.Lock()
+	defer c.retryMu.Unlock()
+	c.reqFallbacks[reqID] = state
+}
+
+func (c *Client) popFallback(reqID string) (sendFallbackState, bool) {
+	c.retryMu.Lock()
+	defer c.retryMu.Unlock()
+	state, ok := c.reqFallbacks[reqID]
+	if ok {
+		delete(c.reqFallbacks, reqID)
+	}
+	return state, ok
+}
+
+func (c *Client) clearFallback(reqID string) {
+	c.retryMu.Lock()
+	defer c.retryMu.Unlock()
+	delete(c.reqFallbacks, reqID)
+}
+
 func (c *Client) requestSession(reqID string) (string, bool) {
 	c.reqMu.RLock()
 	defer c.reqMu.RUnlock()
@@ -764,12 +882,13 @@ func (c *Client) requestSession(reqID string) (string, bool) {
 
 func (c *Client) untrackRequest(reqID string) {
 	c.reqMu.Lock()
-	defer c.reqMu.Unlock()
 	if runID, ok := c.reqToRun[reqID]; ok {
 		delete(c.reqToRun, reqID)
 		delete(c.runToReq, runID)
 	}
 	delete(c.reqToSession, reqID)
+	c.reqMu.Unlock()
+	c.clearFallback(reqID)
 }
 
 func (c *Client) resolveSessionID(corrID string, payload map[string]any) string {
@@ -816,13 +935,19 @@ func (c *Client) setRunLastText(runID, text string) {
 }
 
 func (c *Client) clearRun(runID string) {
+	var reqID string
+
 	c.reqMu.Lock()
-	if reqID, ok := c.runToReq[runID]; ok {
+	if rid, ok := c.runToReq[runID]; ok {
+		reqID = rid
 		delete(c.runToReq, runID)
-		delete(c.reqToRun, reqID)
-		delete(c.reqToSession, reqID)
+		delete(c.reqToRun, rid)
+		delete(c.reqToSession, rid)
 	}
 	c.reqMu.Unlock()
+	if reqID != "" {
+		c.clearFallback(reqID)
+	}
 
 	c.runMu.Lock()
 	defer c.runMu.Unlock()
@@ -862,6 +987,31 @@ func (c *Client) setReady(ready bool) {
 	c.stateMu.Lock()
 	defer c.stateMu.Unlock()
 	c.ready = ready
+}
+
+func (c *Client) buildSendMethodAttempts(event protocol.Event) []string {
+	primary := normalizeMethod(c.cfg.SendMethod)
+	if primary == "" {
+		primary = "agent"
+	}
+
+	candidates := []string{primary}
+	for _, m := range c.cfg.SendMethodFallbacks {
+		candidates = append(candidates, normalizeMethod(m))
+	}
+
+	switch {
+	case isAgentMethod(primary):
+		candidates = append(candidates, "chat.send")
+	case isChatSendMethod(primary):
+		candidates = append(candidates, "agent")
+	case requiresAddressedMessage(primary):
+		if !hasAddressingHints(event) {
+			candidates = append(candidates, "agent", "chat.send")
+		}
+	}
+
+	return dedupeMethods(candidates)
 }
 
 func (c *Client) buildConnectAttempts() []connectAttempt {
@@ -995,6 +1145,44 @@ func dedupeNonEmptyStrings(values ...string) []string {
 	return out
 }
 
+func dedupeMethods(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, v := range values {
+		v = normalizeMethod(v)
+		if v == "" {
+			continue
+		}
+		if _, ok := seen[v]; ok {
+			continue
+		}
+		seen[v] = struct{}{}
+		out = append(out, v)
+	}
+	return out
+}
+
+func hasAddressingHints(event protocol.Event) bool {
+	if strings.TrimSpace(event.To) != "" ||
+		strings.TrimSpace(event.Channel) != "" ||
+		strings.TrimSpace(event.AccountID) != "" ||
+		strings.TrimSpace(event.SessionKey) != "" ||
+		strings.TrimSpace(event.MediaURL) != "" {
+		return true
+	}
+	for _, u := range event.MediaURLs {
+		if strings.TrimSpace(u) != "" {
+			return true
+		}
+	}
+	for _, item := range event.Attachments {
+		if strings.TrimSpace(item.URL) != "" {
+			return true
+		}
+	}
+	return false
+}
+
 func isConnectSchemaError(err error) bool {
 	if err == nil {
 		return false
@@ -1012,6 +1200,20 @@ func isScopeError(err error) bool {
 	}
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "missing scope")
+}
+
+func isSendMethodCompatError(msg string) bool {
+	lower := strings.ToLower(strings.TrimSpace(msg))
+	if lower == "" {
+		return false
+	}
+	return strings.Contains(lower, "unknown method") ||
+		strings.Contains(lower, "invalid send params") ||
+		strings.Contains(lower, "invalid params") ||
+		strings.Contains(lower, "unexpected property") ||
+		strings.Contains(lower, "must have required property") ||
+		strings.Contains(lower, "delivering to whatsapp requires target") ||
+		strings.Contains(lower, "content is required for agent method")
 }
 
 func requiresAddressedMessage(method string) bool {
