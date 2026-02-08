@@ -97,7 +97,7 @@ cp connector/config.example.json /etc/openclaw-bridge/connector.json
 - `gateway.client.id`：默认 `cli`（部分 Gateway 版本会校验固定 id）
 - `gateway.client.mode`：默认 `operator`（若 Gateway 校验不通过，Connector 会自动回退尝试 `cli/desktop`）
 - `gateway.client.version` / `gateway.client.platform`：为必填字段
-- `gateway.scopes`：默认 `["operator.read","operator.write"]`
+- `gateway.scopes`：默认 `["operator.read","operator.write","operator.admin"]`
 
 启动 Connector：
 
@@ -223,7 +223,7 @@ go build -o /tmp/openclaw-cli ./cli
 
 ### `missing scope: operator.admin`
 
-- Connector 会自动回退重连并补充 `operator.admin` scope
+- Connector 会优先用包含 `operator.admin` 的 scope 连接，失败才回退
 - 如果仍失败，说明 Gateway token 本身不允许该 scope（需检查 OpenClaw token 权限）
 
 ### `GATEWAY_NOT_READY`

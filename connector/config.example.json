@@ -20,7 +20,7 @@
     },
     "min_protocol": 3,
     "max_protocol": 3,
-    "scopes": ["operator.read", "operator.write"],
+    "scopes": ["operator.read", "operator.write", "operator.admin"],
     "locale": "en-US",
     "user_agent": "openclaw-bridge-connector/0.1.0",
     "challenge_timeout_seconds": 8,

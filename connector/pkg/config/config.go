@@ -98,7 +98,7 @@ func Load(path string) (Config, error) {
 		cfg.Gateway.MaxProtocol = cfg.Gateway.MinProtocol
 	}
 	if len(cfg.Gateway.Scopes) == 0 {
-		cfg.Gateway.Scopes = []string{"operator.read", "operator.write"}
+		cfg.Gateway.Scopes = []string{"operator.read", "operator.write", "operator.admin"}
 	}
 	if cfg.Gateway.Locale == "" {
 		cfg.Gateway.Locale = "en-US"

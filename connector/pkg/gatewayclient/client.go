@@ -706,7 +706,7 @@ func buildScopeAttempts(base []string) [][]string {
 	if equalScopes(primary, withAdmin) {
 		return [][]string{primary}
 	}
-	return [][]string{primary, withAdmin}
+	return [][]string{withAdmin, primary}
 }
 
 func dedupeNonEmptyScopes(scopes []string) []string {

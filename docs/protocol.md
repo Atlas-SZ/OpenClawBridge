@@ -92,7 +92,7 @@ v0.1 uses JSON event payload for text chat.
 
 ## Connector <-> Gateway Mapping (Phase 2)
 - Connector waits for `connect.challenge`, then sends `connect` as `role=operator`.
-- Connector sends configured scopes first; if Gateway rejects with missing scope, connector retries with `operator.admin` appended.
+- Connector prefers scopes including `operator.admin`; if rejected, connector retries without `operator.admin`.
 - `user_message` -> Gateway request (`gateway.send_method`, default `chat.send`).
   - If method is `chat.send`/`*.chat.send`, params are:
     - `sessionKey` generated from bridge `session_id`
