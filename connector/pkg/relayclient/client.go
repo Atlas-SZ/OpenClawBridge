@@ -65,6 +65,15 @@ func (c *Client) connectAndServe(ctx context.Context) error {
 		return err
 	}
 	c.setConn(conn)
+	connDone := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = conn.Close()
+		case <-connDone:
+		}
+	}()
+	defer close(connDone)
 
 	if err := c.SendControl(protocol.ControlMessage{
 		Type:           protocol.TypeRegister,

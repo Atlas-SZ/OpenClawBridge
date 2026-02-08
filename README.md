@@ -95,7 +95,7 @@ cp connector/config.example.json /etc/openclaw-bridge/connector.json
 - `gateway.auth.token`：OpenClaw operator token
 - `gateway.min_protocol` / `gateway.max_protocol`：Gateway 协议版本（默认 `3/3`）
 - `gateway.client.id`：默认 `cli`（部分 Gateway 版本会校验固定 id）
-- `gateway.client.mode`：默认 `operator`
+- `gateway.client.mode`：默认 `operator`（若 Gateway 校验不通过，Connector 会自动回退尝试 `cli/desktop`）
 - `gateway.client.version` / `gateway.client.platform`：为必填字段
 - `gateway.scopes`：默认 `["operator.read","operator.write"]`
 
@@ -166,6 +166,8 @@ systemctl enable --now openclaw-bridge-connector
 systemctl status openclaw-bridge-connector
 ```
 
+说明：仓库内 systemd 模板使用 `WorkingDirectory=/`，不依赖代码目录路径。
+
 ## Connector Config Example
 
 `connector/config.example.json`：
@@ -211,7 +213,7 @@ go build -o /tmp/openclaw-cli ./cli
 
 - 检查 `gateway.client` 是否包含：
   - `id`（推荐先用 `cli`）
-  - `mode`（`operator`）
+  - `mode`（建议 `operator`，若 Gateway 严格校验会自动回退 `cli/desktop`）
   - `version`
   - `platform`
 - 检查 `caps` 是否为数组（代码默认 `[]`）

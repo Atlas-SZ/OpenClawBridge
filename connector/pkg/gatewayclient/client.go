@@ -51,6 +51,11 @@ type envelope struct {
 	Error   *gatewayError   `json:"error,omitempty"`
 }
 
+type connectAttempt struct {
+	ClientID string
+	Mode     string
+}
+
 type gatewayError struct {
 	Message string `json:"message,omitempty"`
 }
@@ -157,7 +162,16 @@ func (c *Client) connectAndServe(ctx context.Context) error {
 	}
 	c.setConn(conn)
 	c.setReady(false)
+	connDone := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = conn.Close()
+		case <-connDone:
+		}
+	}()
 	defer func() {
+		close(connDone)
 		c.setReady(false)
 		c.closeConn()
 	}()
@@ -246,6 +260,40 @@ func (c *Client) waitForChallenge(conn *websocket.Conn) error {
 }
 
 func (c *Client) performConnect(conn *websocket.Conn) error {
+	attempts := c.buildConnectAttempts()
+	var lastErr error
+
+	for _, attempt := range attempts {
+		err := c.performConnectAttempt(conn, attempt)
+		if err == nil {
+			if attempt.ClientID != c.cfg.Client.ID || attempt.Mode != c.cfg.Client.Mode {
+				c.logger.Printf(
+					"gateway connect fallback accepted client_id=%s mode=%s (configured id=%s mode=%s)",
+					attempt.ClientID,
+					attempt.Mode,
+					c.cfg.Client.ID,
+					c.cfg.Client.Mode,
+				)
+			}
+			return nil
+		}
+		if errors.Is(err, ErrGatewayAuthFailed) {
+			return err
+		}
+		lastErr = err
+		if !isConnectSchemaError(err) {
+			return err
+		}
+		c.logger.Printf("gateway connect schema rejected client_id=%s mode=%s err=%v", attempt.ClientID, attempt.Mode, err)
+	}
+
+	if lastErr != nil {
+		return lastErr
+	}
+	return errors.New("gateway connect failed: no attempts")
+}
+
+func (c *Client) performConnectAttempt(conn *websocket.Conn, attempt connectAttempt) error {
 	reqID := newID("gw_connect_")
 	connectReq := map[string]any{
 		"type":   "req",
@@ -258,11 +306,11 @@ func (c *Client) performConnect(conn *websocket.Conn) error {
 				"token": c.cfg.Auth.Token,
 			},
 			"client": map[string]any{
-				"id":          c.cfg.Client.ID,
+				"id":          attempt.ClientID,
 				"displayName": c.cfg.Client.DisplayName,
 				"version":     c.cfg.Client.Version,
 				"platform":    c.cfg.Client.Platform,
-				"mode":        c.cfg.Client.Mode,
+				"mode":        attempt.Mode,
 			},
 			"role":      "operator",
 			"scopes":    c.cfg.Scopes,
@@ -468,6 +516,49 @@ func (c *Client) setReady(ready bool) {
 	c.stateMu.Lock()
 	defer c.stateMu.Unlock()
 	c.ready = ready
+}
+
+func (c *Client) buildConnectAttempts() []connectAttempt {
+	ids := uniqueNonEmpty(c.cfg.Client.ID, "cli", "bridge-connector")
+	modes := uniqueNonEmpty(c.cfg.Client.Mode, "operator", "cli", "desktop")
+
+	attempts := make([]connectAttempt, 0, len(ids)*len(modes))
+	for _, id := range ids {
+		for _, mode := range modes {
+			attempts = append(attempts, connectAttempt{
+				ClientID: id,
+				Mode:     mode,
+			})
+		}
+	}
+	return attempts
+}
+
+func uniqueNonEmpty(values ...string) []string {
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, v := range values {
+		if v == "" {
+			continue
+		}
+		if _, ok := seen[v]; ok {
+			continue
+		}
+		seen[v] = struct{}{}
+		result = append(result, v)
+	}
+	return result
+}
+
+func isConnectSchemaError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "/client/id") ||
+		strings.Contains(msg, "client/id") ||
+		strings.Contains(msg, "/client/mode") ||
+		strings.Contains(msg, "client/mode")
 }
 
 func decodePayload(raw json.RawMessage) map[string]any {

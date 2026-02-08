@@ -6,7 +6,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/opt/OpenClawBridge
+WorkingDirectory=/
 ExecStart=/usr/local/bin/openclaw-relay -addr :8080
 Restart=always
 RestartSec=3

@@ -6,7 +6,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/opt/OpenClawBridge
+WorkingDirectory=/
 ExecStart=/usr/local/bin/openclaw-connector -config /etc/openclaw-bridge/connector.json
 Restart=always
 RestartSec=5
