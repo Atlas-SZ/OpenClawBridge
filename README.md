@@ -75,8 +75,9 @@ mkdir -p /etc/openclaw-bridge
       "displayName": "OpenClaw Bridge Connector",
       "version": "0.1.0",
       "platform": "linux",
-      "mode": "operator"
+      "mode": "cli"
     },
+    "scopes": ["operator.read", "operator.write"],
     "send_method": "agent",
     "cancel_method": "chat.abort"
   }
@@ -120,6 +121,20 @@ systemctl enable --now openclaw-bridge-connector
 - `missing scope: operator.admin`：Connector 会自动尝试补 admin scope；若仍失败，说明 token 本身无该权限。
 - `unknown method ...`：`send_method` 拼写错误，推荐保持 `agent`。
 - 发送后长时间无返回：用 `-response-timeout` 防止 CLI 无限制等待，并查看 Connector/Gateway 日志。
+
+## 导出当前服务器配置（给我排查用）
+
+不要在命令前加 `cat`，直接执行下面这些命令：
+
+```bash
+cat /etc/openclaw-bridge/connector.json
+systemctl cat openclaw-bridge-connector.service
+systemctl cat openclaw-bridge-relay.service
+systemctl --user cat openclaw-gateway.service
+cat /etc/nginx/conf.d/openclaw-bridge.conf
+journalctl -u openclaw-bridge-connector -n 80 --no-pager
+journalctl --user -u openclaw-gateway.service -n 80 --no-pager
+```
 
 ## 文档
 
