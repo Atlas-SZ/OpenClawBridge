@@ -421,9 +421,16 @@ func (c *Client) handleResponse(env envelope) error {
 	}
 
 	if env.OK == nil || *env.OK {
-		runID := extractRunID(decodePayload(env.Payload))
+		payload := decodePayload(env.Payload)
+		runID := extractRunID(payload)
 		if runID != "" {
 			c.trackRun(runID, sessionID)
+		}
+		if strings.HasPrefix(env.ID, "gw_req_") {
+			if content := extractChatText(payload); content != "" {
+				c.emitEvent(sessionID, protocol.Event{Type: protocol.EventToken, Content: content})
+				c.emitEvent(sessionID, protocol.Event{Type: protocol.EventEnd})
+			}
 		}
 		c.untrackRequest(env.ID)
 		return nil
@@ -831,6 +838,14 @@ func extractContent(payload map[string]any) string {
 }
 
 func extractChatText(payload map[string]any) string {
+	for _, key := range []string{"response", "result", "data", "output"} {
+		if nested, ok := payload[key].(map[string]any); ok {
+			if content := extractChatText(nested); content != "" {
+				return content
+			}
+		}
+	}
+
 	if msgObj, ok := payload["message"].(map[string]any); ok {
 		if content := messageContentText(msgObj["content"]); content != "" {
 			return content
@@ -915,7 +930,7 @@ func isDisconnectEventName(name string) bool {
 }
 
 func isChatEventName(name string) bool {
-	return name == "chat" || strings.HasSuffix(name, ".chat")
+	return strings.Contains(name, "chat")
 }
 
 func stringValue(v any) string {

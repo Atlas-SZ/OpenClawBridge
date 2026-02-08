@@ -249,6 +249,12 @@ go build -o /tmp/openclaw-cli ./cli
 - 这是 `send` 通道在尝试投递 WhatsApp
 - 用户侧对话应使用 `chat.send`，而不是 `send`
 
+### 发送后无报错但一直等待
+
+- Connector 已兼容两种返回模式：
+  - Gateway 流式 chat 事件（token/end）
+  - `chat.send` 同步响应（从响应体提取答案并回传 token/end）
+
 ## Protocol & Boundaries
 
 - 协议文档：`docs/protocol.md`
