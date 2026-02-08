@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/gorilla/websocket"
 
@@ -16,6 +17,7 @@ import (
 func main() {
 	relayURL := flag.String("relay-url", "ws://127.0.0.1:8080/client", "relay client websocket url")
 	accessCode := flag.String("access-code", "", "access code")
+	responseTimeout := flag.Duration("response-timeout", 45*time.Second, "max wait per prompt before timing out")
 	flag.Parse()
 
 	if strings.TrimSpace(*accessCode) == "" {
@@ -75,6 +77,9 @@ func main() {
 			select {
 			case err := <-errs:
 				log.Fatalf("read error=%v", err)
+			case <-time.After(*responseTimeout):
+				fmt.Printf("\nerror: RESPONSE_TIMEOUT no terminal event within %s\n", responseTimeout.String())
+				goto nextInput
 			case ev := <-events:
 				switch ev.Type {
 				case protocol.EventToken:

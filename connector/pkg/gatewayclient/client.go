@@ -430,6 +430,13 @@ func (c *Client) handleResponse(env envelope) error {
 			if content := extractChatText(payload); content != "" {
 				c.emitEvent(sessionID, protocol.Event{Type: protocol.EventToken, Content: content})
 				c.emitEvent(sessionID, protocol.Event{Type: protocol.EventEnd})
+			} else if runID == "" {
+				c.emitEvent(sessionID, protocol.Event{
+					Type:    protocol.EventError,
+					Code:    "GATEWAY_NO_OUTPUT",
+					Message: "gateway accepted request but returned no output",
+				})
+				c.emitEvent(sessionID, protocol.Event{Type: protocol.EventEnd})
 			}
 		}
 		c.untrackRequest(env.ID)
@@ -513,6 +520,10 @@ func (c *Client) handleChatEvent(sessionID, runID string, payload map[string]any
 	default:
 		if text != "" {
 			c.emitChatToken(sessionID, runID, text)
+			// Some gateway versions return single-shot chat events with no state/run id.
+			if runID == "" && state == "" {
+				c.emitEvent(sessionID, protocol.Event{Type: protocol.EventEnd})
+			}
 		}
 	}
 }
@@ -814,6 +825,20 @@ func extractRunID(payload map[string]any) string {
 	for _, key := range []string{"run_id", "runId"} {
 		if runID := stringValue(payload[key]); runID != "" {
 			return runID
+		}
+	}
+	if runObj, ok := payload["run"].(map[string]any); ok {
+		for _, key := range []string{"id", "run_id", "runId"} {
+			if runID := stringValue(runObj[key]); runID != "" {
+				return runID
+			}
+		}
+	}
+	for _, key := range []string{"response", "result", "data", "output"} {
+		if nested, ok := payload[key].(map[string]any); ok {
+			if runID := extractRunID(nested); runID != "" {
+				return runID
+			}
 		}
 	}
 	return ""

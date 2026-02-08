@@ -153,6 +153,7 @@ go run ./cli -relay-url wss://YOUR_DOMAIN/client -access-code YOUR_ACCESS_CODE
 ```
 
 要求：`-access-code` 必须与 Connector 配置中的 `access_code` 一致。
+可选：`-response-timeout 45s` 控制每次提问最大等待时长，避免无终止事件时卡住。
 
 ### OpenClaw 侧 Connector 作为 systemd service 长期运行（推荐）
 
