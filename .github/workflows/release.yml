@@ -1,0 +1,131 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-packages:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            ext: ""
+            archive: tar.gz
+          - os: macos-latest
+            goos: darwin
+            goarch: amd64
+            ext: ""
+            archive: tar.gz
+          - os: windows-latest
+            goos: windows
+            goarch: amd64
+            ext: ".exe"
+            archive: zip
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build binaries (unix)
+        if: matrix.os != 'windows-latest'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist package
+          export CGO_ENABLED=0
+          export GOOS='${{ matrix.goos }}'
+          export GOARCH='${{ matrix.goarch }}'
+
+          go build -trimpath -ldflags "-s -w" -o "dist/openclaw-relay${{ matrix.ext }}" ./relay
+          go build -trimpath -ldflags "-s -w" -o "dist/openclaw-connector${{ matrix.ext }}" ./connector
+          go build -trimpath -ldflags "-s -w" -o "dist/openclaw-cli${{ matrix.ext }}" ./cli
+
+          pkg="openclaw-bridge-${{ matrix.goos }}-${{ matrix.goarch }}"
+          mkdir -p "package/$pkg"
+          cp dist/openclaw-relay${{ matrix.ext }} "package/$pkg/"
+          cp dist/openclaw-connector${{ matrix.ext }} "package/$pkg/"
+          cp dist/openclaw-cli${{ matrix.ext }} "package/$pkg/"
+          cp README.md LICENSE "package/$pkg/"
+
+          tar -C package -czf "dist/${pkg}.tar.gz" "$pkg"
+
+      - name: Build binaries (windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path dist -Force | Out-Null
+          New-Item -ItemType Directory -Path package -Force | Out-Null
+
+          $env:CGO_ENABLED = "0"
+          $env:GOOS = "${{ matrix.goos }}"
+          $env:GOARCH = "${{ matrix.goarch }}"
+
+          go build -trimpath -ldflags "-s -w" -o "dist/openclaw-relay${{ matrix.ext }}" ./relay
+          go build -trimpath -ldflags "-s -w" -o "dist/openclaw-connector${{ matrix.ext }}" ./connector
+          go build -trimpath -ldflags "-s -w" -o "dist/openclaw-cli${{ matrix.ext }}" ./cli
+
+          $pkg = "openclaw-bridge-${{ matrix.goos }}-${{ matrix.goarch }}"
+          New-Item -ItemType Directory -Path "package/$pkg" -Force | Out-Null
+          Copy-Item "dist/openclaw-relay${{ matrix.ext }}" "package/$pkg/"
+          Copy-Item "dist/openclaw-connector${{ matrix.ext }}" "package/$pkg/"
+          Copy-Item "dist/openclaw-cli${{ matrix.ext }}" "package/$pkg/"
+          Copy-Item "README.md" "package/$pkg/"
+          Copy-Item "LICENSE" "package/$pkg/"
+
+          Compress-Archive -Path "package/$pkg/*" -DestinationPath "dist/$pkg.zip" -Force
+
+      - name: Upload package (tar.gz)
+        if: matrix.archive == 'tar.gz'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/openclaw-bridge-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz
+
+      - name: Upload package (zip)
+        if: matrix.archive == 'zip'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/openclaw-bridge-${{ matrix.goos }}-${{ matrix.goarch }}.zip
+
+  publish-release:
+    needs: build-packages
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: release-*
+          merge-multiple: true
+
+      - name: Generate SHA256 checksums
+        run: |
+          cd artifacts
+          sha256sum * > SHA256SUMS.txt
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/*
+          generate_release_notes: true
