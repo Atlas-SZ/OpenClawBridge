@@ -17,6 +17,15 @@
 - Gateway 鉴权失败直接退出（不 silent retry）
 - Gateway 断线指数退避重连
 
+## Security & Privacy（直白版）
+
+- Relay 不保存聊天内容，不落盘 payload。
+- Relay 不解析业务内容，只看会话路由所需字段（控制帧 + DATA header）。
+- 你的 OpenClaw Gateway 不需要暴露公网端口。
+- Connector 连接 Gateway 必须带 token，鉴权失败会直接退出。
+- 这个项目不做账号体系，`access_code` 泄露就等于访问权限泄露。
+- 这个项目不负责 OpenClaw 本身的安全问题（例如 Gateway 漏洞、主机被入侵）。
+
 ## Architecture
 
 ```text
@@ -43,7 +52,7 @@ Client (CLI / App)
 - Go 1.22+
 - OpenClaw Gateway 已在 Connector 机器上运行（默认 `ws://127.0.0.1:18789`）
 
-## Quick Start (Local)
+## Quick Start (Local Demo)
 
 ### 1) 初始化
 
@@ -67,7 +76,15 @@ go mod tidy
 - `gateway.send_method`（默认 `send`）
 - `gateway.cancel_method`（默认 `cancel`）
 
-### 3) 启动（3 个终端）
+### 3) 启动（仅单机演示用）
+
+下面 3 条命令是为了在**同一台开发机**快速验收链路，不是说生产环境必须一台机器开 3 个终端。
+
+实际部署是分角色运行：
+
+- Relay 在云服务器
+- Connector 在你的 OpenClaw 机器
+- Client（CLI/App）在用户设备
 
 终端 A（Relay）：
 
