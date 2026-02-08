@@ -221,6 +221,11 @@ go build -o /tmp/openclaw-cli ./cli
   - `platform`
 - 检查 `caps` 是否为数组（代码默认 `[]`）
 
+### `missing scope: operator.admin`
+
+- Connector 会自动回退重连并补充 `operator.admin` scope
+- 如果仍失败，说明 Gateway token 本身不允许该 scope（需检查 OpenClaw token 权限）
+
 ### `GATEWAY_NOT_READY`
 
 - Gateway 未启动或地址错误

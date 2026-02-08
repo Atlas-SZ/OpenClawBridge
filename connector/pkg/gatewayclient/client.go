@@ -58,6 +58,7 @@ type envelope struct {
 type connectAttempt struct {
 	ClientID string
 	Mode     string
+	Scopes   []string
 }
 
 type gatewayError struct {
@@ -305,13 +306,15 @@ func (c *Client) performConnect(conn *websocket.Conn) error {
 	for _, attempt := range attempts {
 		err := c.performConnectAttempt(conn, attempt)
 		if err == nil {
-			if attempt.ClientID != c.cfg.Client.ID || attempt.Mode != c.cfg.Client.Mode {
+			if attempt.ClientID != c.cfg.Client.ID || attempt.Mode != c.cfg.Client.Mode || !equalScopes(attempt.Scopes, c.cfg.Scopes) {
 				c.logger.Printf(
-					"gateway connect fallback accepted client_id=%s mode=%s (configured id=%s mode=%s)",
+					"gateway connect fallback accepted client_id=%s mode=%s scopes=%v (configured id=%s mode=%s scopes=%v)",
 					attempt.ClientID,
 					attempt.Mode,
+					attempt.Scopes,
 					c.cfg.Client.ID,
 					c.cfg.Client.Mode,
+					c.cfg.Scopes,
 				)
 			}
 			return nil
@@ -320,10 +323,10 @@ func (c *Client) performConnect(conn *websocket.Conn) error {
 			return err
 		}
 		lastErr = err
-		if !isConnectSchemaError(err) {
+		if !isConnectSchemaError(err) && !isScopeError(err) {
 			return err
 		}
-		c.logger.Printf("gateway connect schema rejected client_id=%s mode=%s err=%v", attempt.ClientID, attempt.Mode, err)
+		c.logger.Printf("gateway connect rejected client_id=%s mode=%s scopes=%v err=%v", attempt.ClientID, attempt.Mode, attempt.Scopes, err)
 	}
 
 	if lastErr != nil {
@@ -352,7 +355,7 @@ func (c *Client) performConnectAttempt(conn *websocket.Conn, attempt connectAtte
 				"mode":        attempt.Mode,
 			},
 			"role":      "operator",
-			"scopes":    c.cfg.Scopes,
+			"scopes":    attempt.Scopes,
 			"caps":      []any{},
 			"locale":    c.cfg.Locale,
 			"userAgent": c.cfg.UserAgent,
@@ -658,14 +661,18 @@ func (c *Client) setReady(ready bool) {
 func (c *Client) buildConnectAttempts() []connectAttempt {
 	ids := uniqueNonEmpty(c.cfg.Client.ID, "cli", "bridge-connector")
 	modes := uniqueNonEmpty(c.cfg.Client.Mode, "operator", "cli", "desktop")
+	scopeAttempts := buildScopeAttempts(c.cfg.Scopes)
 
-	attempts := make([]connectAttempt, 0, len(ids)*len(modes))
+	attempts := make([]connectAttempt, 0, len(ids)*len(modes)*len(scopeAttempts))
 	for _, id := range ids {
 		for _, mode := range modes {
-			attempts = append(attempts, connectAttempt{
-				ClientID: id,
-				Mode:     mode,
-			})
+			for _, scopes := range scopeAttempts {
+				attempts = append(attempts, connectAttempt{
+					ClientID: id,
+					Mode:     mode,
+					Scopes:   scopes,
+				})
+			}
 		}
 	}
 	return attempts
@@ -687,6 +694,50 @@ func uniqueNonEmpty(values ...string) []string {
 	return result
 }
 
+func buildScopeAttempts(base []string) [][]string {
+	primary := dedupeNonEmptyScopes(base)
+	if len(primary) == 0 {
+		primary = []string{"operator.read", "operator.write"}
+	}
+
+	withAdmin := append(dedupeNonEmptyScopes(primary), "operator.admin")
+	withAdmin = dedupeNonEmptyScopes(withAdmin)
+
+	if equalScopes(primary, withAdmin) {
+		return [][]string{primary}
+	}
+	return [][]string{primary, withAdmin}
+}
+
+func dedupeNonEmptyScopes(scopes []string) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(scopes))
+	for _, s := range scopes {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		if _, ok := seen[s]; ok {
+			continue
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	return out
+}
+
+func equalScopes(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func isConnectSchemaError(err error) bool {
 	if err == nil {
 		return false
@@ -696,6 +747,14 @@ func isConnectSchemaError(err error) bool {
 		strings.Contains(msg, "client/id") ||
 		strings.Contains(msg, "/client/mode") ||
 		strings.Contains(msg, "client/mode")
+}
+
+func isScopeError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "missing scope")
 }
 
 func requiresAddressedMessage(method string) bool {
