@@ -150,7 +150,11 @@ func (c *Client) buildSendParams(sessionID, reqID string, event protocol.Event) 
 
 	if isAgentMethod(c.cfg.SendMethod) {
 		if content == "" {
-			return nil, errors.New("content is required for agent method")
+			if len(attachments) > 0 {
+				content = "Please analyze the attachment."
+			} else {
+				return nil, errors.New("content is required for agent method")
+			}
 		}
 		params := map[string]any{
 			"sessionKey":     gatewaySessionKey(sessionID),
