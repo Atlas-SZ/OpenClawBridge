@@ -49,6 +49,35 @@ User App/CLI -> Relay -> Connector -> OpenClaw Gateway
 - Go 1.22+
 - OpenClaw Gateway 运行在 OpenClaw 服务器（默认 `ws://127.0.0.1:18789`）
 
+## Download & Install
+
+在需要部署的每台机器上先下载代码：
+
+```bash
+git clone https://github.com/Atlas-SZ/OpenClawBridge.git
+cd OpenClawBridge
+```
+
+### 中继服务器安装（relay）
+
+```bash
+go mod tidy
+go build -o /usr/local/bin/openclaw-relay ./relay
+chmod +x /usr/local/bin/openclaw-relay
+```
+
+### OpenClaw 侧服务器安装（connector）
+
+```bash
+go mod tidy
+go build -o /usr/local/bin/openclaw-connector ./connector
+chmod +x /usr/local/bin/openclaw-connector
+mkdir -p /etc/openclaw-bridge
+cp connector/config.example.json /etc/openclaw-bridge/connector.json
+```
+
+然后编辑 `/etc/openclaw-bridge/connector.json`（至少填写 `relay_url`、`gateway.auth.token`、`access_code`）。
+
 ## Deployment
 
 ### A. OpenClaw 侧（远端服务器）
@@ -57,14 +86,6 @@ User App/CLI -> Relay -> Connector -> OpenClaw Gateway
 
 1. OpenClaw Gateway（本地地址，如 `ws://127.0.0.1:18789`）
 2. Connector
-
-初始化：
-
-```bash
-go mod tidy
-```
-
-配置文件默认读取：`connector/config.example.json`
 
 关键配置：
 
@@ -76,7 +97,7 @@ go mod tidy
 启动 Connector：
 
 ```bash
-go run ./connector
+/usr/local/bin/openclaw-connector -config /etc/openclaw-bridge/connector.json
 ```
 
 如果你的 Gateway 方法名不是默认值，调整：
@@ -89,7 +110,7 @@ go run ./connector
 启动 Relay：
 
 ```bash
-go run ./relay -addr :8080
+/usr/local/bin/openclaw-relay -addr :8080
 ```
 
 生产建议通过 Nginx 提供 TLS 与 WebSocket 反代。
