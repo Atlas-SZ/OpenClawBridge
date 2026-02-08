@@ -1,189 +1,81 @@
-# openclaw-bridge
+# OpenClawBridge
 
-`openclaw-bridge` 是一个 WebSocket 桥接系统：
-在不暴露 OpenClaw Gateway 公网端口的前提下，让用户客户端访问远端 OpenClaw。
+OpenClawBridge 是一个 WebSocket 桥接系统，用于在**不暴露 OpenClaw Gateway 公网端口**的前提下，让用户侧应用安全访问远端 OpenClaw。
 
-## Architecture
-
-固定架构（按角色分三段）：
-
-1. OpenClaw 侧（远端服务器）：`OpenClaw Gateway + connector`
-2. 中继侧（独立服务器）：`relay`
-3. 用户侧：`app/cli`
-
-链路：
+固定架构：
 
 ```text
-User App/CLI -> Relay -> Connector -> OpenClaw Gateway
+用户侧 App/CLI -> Relay(中继服务器) -> Connector(OpenClaw 服务器) -> OpenClaw Gateway(127.0.0.1)
 ```
 
-## Components
+## 项目定位
 
-- `relay`：中继服务（仅转发，不存 payload）
-- `connector`：OpenClaw 侧桥接器（连接 Relay 与本地 Gateway）
-- `cli`：命令行客户端（验收工具）
+- `relay`：中继服务，只做转发，不存 payload。
+- `connector`：部署在 OpenClaw 服务器，连接 Relay 和本地 Gateway。
+- `cli`：用户侧验收工具，用来验证链路。
 
-## Security & Privacy
+## 设计边界（v0.1）
 
-- Relay 不保存聊天内容，不落盘 payload。
-- Relay 不解析业务内容，只解析路由所需头部。
-- OpenClaw Gateway 仅本地监听，不暴露公网端口。
-- Connector 连接 Gateway 需要 token；鉴权失败直接退出。
-- 本项目无账号体系，`access_code` 泄露即访问权限泄露。
-- 本项目不替代 OpenClaw 自身安全（主机被入侵/Gateway 漏洞不在本项目防护范围）。
+- 无账号体系，`access_code` 是唯一凭证。
+- Relay 不保存消息内容，不落盘 payload，不记录 payload 日志。
+- Relay 只解析控制帧和 DATA 头，不解析业务语义。
+- 并发、排队、会话语义交给 OpenClaw，本项目不做写锁/并发拦截。
 
-## Repository Layout
+## Quick Start
 
-```text
-.
-├── relay/         # 中继服务
-├── connector/     # OpenClaw 侧桥接器
-├── cli/           # 用户侧验收客户端
-├── deploy/        # 部署模板（Nginx）
-├── shared/        # 共享协议
-└── docs/          # 协议与边界文档
-```
+以下步骤按角色分三段，适合你的生产架构（不是单机演示）。
 
-## Prerequisites
-
-- Go 1.22+
-- OpenClaw Gateway 运行在 OpenClaw 服务器（默认 `ws://127.0.0.1:18789`）
-
-## Download & Install
-
-在需要部署的每台机器上先下载代码：
+### 1) 准备代码（两台服务器都执行）
 
 ```bash
 git clone https://github.com/Atlas-SZ/OpenClawBridge.git
 cd OpenClawBridge
+go mod tidy
 ```
 
-### 中继服务器安装（relay）
+### 2) 中继服务器（Relay）
+
+编译并启动：
 
 ```bash
-go mod tidy
 go build -o /usr/local/bin/openclaw-relay ./relay
-chmod +x /usr/local/bin/openclaw-relay
-```
-
-### OpenClaw 侧服务器安装（connector）
-
-```bash
-go mod tidy
-go build -o /usr/local/bin/openclaw-connector ./connector
-chmod +x /usr/local/bin/openclaw-connector
-mkdir -p /etc/openclaw-bridge
-cp connector/config.example.json /etc/openclaw-bridge/connector.json
-```
-
-然后编辑 `/etc/openclaw-bridge/connector.json`（至少填写 `relay_url`、`gateway.auth.token`、`access_code`）。
-
-## Deployment
-
-### A. OpenClaw 侧（远端服务器）
-
-部署并运行：
-
-1. OpenClaw Gateway（本地地址，如 `ws://127.0.0.1:18789`）
-2. Connector
-
-关键配置：
-
-- `relay_url`：指向中继服务器的 `/tunnel`（生产建议 `wss://.../tunnel`）
-- `access_code`：给用户客户端使用的授权码
-- `gateway.url`：本地 Gateway 地址
-- `gateway.auth.token`：OpenClaw operator token
-- `gateway.min_protocol` / `gateway.max_protocol`：Gateway 协议版本（默认 `3/3`）
-- `gateway.client.id`：默认 `cli`（部分 Gateway 版本会校验固定 id）
-- `gateway.client.mode`：默认 `operator`（若 Gateway 校验不通过，Connector 会自动回退尝试 `cli/desktop`）
-- `gateway.client.version` / `gateway.client.platform`：为必填字段
-- `gateway.scopes`：默认 `["operator.read","operator.write","operator.admin"]`
-
-启动 Connector：
-
-```bash
-/usr/local/bin/openclaw-connector -config /etc/openclaw-bridge/connector.json
-```
-
-如果你的 Gateway 方法名不是默认值，调整：
-
-- `gateway.send_method`（默认 `agent`）
-- `gateway.cancel_method`（默认 `chat.abort`）
-- `gateway.send_to`（仅在你把 `send_method` 改回 `send` 时才使用，默认 `remote`）
-
-### B. 中继侧（中继服务器）
-
-启动 Relay：
-
-```bash
 /usr/local/bin/openclaw-relay -addr :8080
 ```
 
-生产建议通过 Nginx 提供 TLS 与 WebSocket 反代。
-仓库模板：`deploy/nginx/openclaw-bridge.conf`
+生产建议：前置 Nginx 提供 TLS/WSS，反代到 Relay：
 
-最小启用步骤：
+- `/tunnel` -> `http://127.0.0.1:8080/tunnel`
+- `/client` -> `http://127.0.0.1:8080/client`
 
-1. 复制模板到 `/etc/nginx/conf.d/openclaw-bridge.conf`
-2. 替换 `DOMAIN`、`CERT_PATH`、`KEY_PATH`
-3. `nginx -t && systemctl reload nginx`
+模板文件：`deploy/nginx/openclaw-bridge.conf`
 
-对外端点：
+### 3) OpenClaw 服务器（Connector）
 
-- `/tunnel` -> Relay `/tunnel`
-- `/client` -> Relay `/client`
-
-#### 作为 systemd service 长期运行（推荐）
-
-仓库模板：`deploy/systemd/openclaw-bridge-relay.service`
+编译：
 
 ```bash
-cp deploy/systemd/openclaw-bridge-relay.service /etc/systemd/system/
-systemctl daemon-reload
-systemctl enable --now openclaw-bridge-relay
-systemctl status openclaw-bridge-relay
-```
-
-### C. 用户侧（客户端设备）
-
-当前客户端为 CLI（验收工具）：
-
-```bash
-go run ./cli -relay-url wss://YOUR_DOMAIN/client -access-code YOUR_ACCESS_CODE
-```
-
-要求：`-access-code` 必须与 Connector 配置中的 `access_code` 一致。
-可选：`-response-timeout 45s` 控制每次提问最大等待时长，避免无终止事件时卡住。
-
-### OpenClaw 侧 Connector 作为 systemd service 长期运行（推荐）
-
-仓库模板：`deploy/systemd/openclaw-bridge-connector.service`
-
-```bash
-cp deploy/systemd/openclaw-bridge-connector.service /etc/systemd/system/
+go build -o /usr/local/bin/openclaw-connector ./connector
 mkdir -p /etc/openclaw-bridge
-# 准备 /etc/openclaw-bridge/connector.json 后再启动
-systemctl daemon-reload
-systemctl enable --now openclaw-bridge-connector
-systemctl status openclaw-bridge-connector
 ```
 
-说明：仓库内 systemd 模板使用 `WorkingDirectory=/`，不依赖代码目录路径。
-
-## Connector Config Example
-
-`connector/config.example.json`：
+创建配置 `/etc/openclaw-bridge/connector.json`（示例）：
 
 ```json
 {
-  "relay_url": "ws://127.0.0.1:8080/tunnel",
+  "relay_url": "wss://YOUR_RELAY_DOMAIN/tunnel",
   "access_code": "A-123456",
+  "generation": 1,
+  "caps": { "e2ee": false },
+  "reconnect_seconds": 2,
   "gateway": {
     "url": "ws://127.0.0.1:18789",
-    "auth": { "token": "GATEWAY_AUTH_TOKEN" },
+    "auth": { "token": "YOUR_GATEWAY_TOKEN" },
     "client": {
-      "id": "bridge-connector",
-      "displayName": "OpenClaw Bridge Connector"
+      "id": "cli",
+      "displayName": "OpenClaw Bridge Connector",
+      "version": "0.1.0",
+      "platform": "linux",
+      "mode": "operator"
     },
     "send_method": "agent",
     "cancel_method": "chat.abort"
@@ -191,82 +83,49 @@ systemctl status openclaw-bridge-connector
 }
 ```
 
-## Build
+启动：
 
 ```bash
-go build -o /tmp/openclaw-relay ./relay
-go build -o /tmp/openclaw-connector ./connector
-go build -o /tmp/openclaw-cli ./cli
+/usr/local/bin/openclaw-connector -config /etc/openclaw-bridge/connector.json
 ```
 
-## Troubleshooting
+### 4) 用户侧（CLI 验证）
 
-### `Gateway auth failed`
+```bash
+go run ./cli -relay-url wss://YOUR_RELAY_DOMAIN/client -access-code A-123456 -response-timeout 30s
+```
 
-- `gateway.auth.token` 无效或为空
-- Connector 按设计会直接退出（fail-fast）
+看到 `connected session=...` 后输入文本，能收到 `token/end` 即链路成功。
 
-### `gateway connect failed: protocol mismatch`
+## 可选：systemd 常驻运行
 
-- Gateway 协议版本不匹配
-- 调整 `/etc/openclaw-bridge/connector.json` 中：
-  - `gateway.min_protocol`
-  - `gateway.max_protocol`
+仓库已提供模板：
 
-### `gateway connect failed: invalid connect params`
+- `deploy/systemd/openclaw-bridge-relay.service`
+- `deploy/systemd/openclaw-bridge-connector.service`
 
-- 检查 `gateway.client` 是否包含：
-  - `id`（推荐先用 `cli`）
-  - `mode`（建议 `operator`，若 Gateway 严格校验会自动回退 `cli/desktop`）
-  - `version`
-  - `platform`
-- 检查 `caps` 是否为数组（代码默认 `[]`）
+安装方式（示例）：
 
-### `missing scope: operator.admin`
+```bash
+cp deploy/systemd/openclaw-bridge-relay.service /etc/systemd/system/
+cp deploy/systemd/openclaw-bridge-connector.service /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now openclaw-bridge-relay
+systemctl enable --now openclaw-bridge-connector
+```
 
-- Connector 会优先用包含 `operator.admin` 的 scope 连接，失败才回退
-- 如果仍失败，说明 Gateway token 本身不允许该 scope（需检查 OpenClaw token 权限）
+## 常见问题（最小版）
 
-### `GATEWAY_NOT_READY`
+- `Gateway auth failed`：`gateway.auth.token` 与 Gateway 配置不一致。
+- `missing scope: operator.admin`：Connector 会自动尝试补 admin scope；若仍失败，说明 token 本身无该权限。
+- `unknown method ...`：`send_method` 拼写错误，推荐保持 `agent`。
+- 发送后长时间无返回：用 `-response-timeout` 防止 CLI 无限制等待，并查看 Connector/Gateway 日志。
 
-- Gateway 未启动或地址错误
-- Connector 会自动重连 Gateway
+## 文档
 
-### 已连接但无 token
-
-- Gateway 方法名可能与默认 `send/cancel` 不一致
-- 调整 `gateway.send_method` / `gateway.cancel_method`
-
-### `invalid send params`（缺少 `to/message/idempotencyKey`）
-
-- 说明你仍在走 `send` 通道协议
-- 推荐改回默认：
-  - `gateway.send_method = "agent"`
-  - `gateway.cancel_method = "chat.abort"`
-- 只有明确要走 `send` 通道时，才配置 `gateway.send_to`
-
-### 出现 WhatsApp target 报错
-
-- 这是 `send` 通道在尝试投递 WhatsApp
-- 用户侧对话应使用 `agent`（或 `chat.send`），而不是 `send`
-
-### 发送后无报错但一直等待
-
-- Connector 已兼容两种返回模式：
-  - Gateway 流式 chat 事件（token/end）
-  - `chat.send` 同步响应（从响应体提取答案并回传 token/end）
-
-## Protocol & Boundaries
-
-- 协议文档：`docs/protocol.md`
-- 边界声明：`docs/boundary.md`
-
-关键边界：
-
-- Relay 不保存 payload，不记录 payload 日志
-- Relay 仅解析控制帧和 DATA header
-- v0.1 不做并发调度/写锁
+- 协议：`docs/protocol.md`
+- 边界：`docs/boundary.md`
 
 ## License
 
-MIT，见 `LICENSE`。
+MIT License, see `LICENSE`.
