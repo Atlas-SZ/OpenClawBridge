@@ -40,6 +40,7 @@ sudo ./deploy/install.sh --role connector
 可选参数：
 
 - `--config /etc/openclaw-bridge/connector.json`：指定 connector 配置路径
+- `--web-root /var/www/openclaw-bridge-web`：指定 Web 静态文件目录（relay）
 - `--role both`：同机安装 relay + connector（仅测试场景）
 
 ### 1) 准备代码（两台服务器都执行）
@@ -63,6 +64,7 @@ go build -o /usr/local/bin/openclaw-relay ./relay
 
 - `/tunnel` -> `http://127.0.0.1:8080/tunnel`
 - `/client` -> `http://127.0.0.1:8080/client`
+- `/` -> Nginx 静态页面（Web 验收页）
 
 模板文件：`deploy/nginx/openclaw-bridge.conf`
 
@@ -120,18 +122,23 @@ CLI 也支持 `json:` 前缀发送完整事件（可用于附件/媒体字段测
 - `-reconnect=true|false`（默认 `true`，断线自动重连）
 - `-reconnect-delay 2s`（重连间隔）
 
-### 5) 用户侧（Web 验收页）
+### 5) 用户侧（Web 验收页，Nginx 静态）
 
 仓库内提供单文件 Web 客户端：`web/client/index.html`。
 
-启动本地静态服务（任选其一）：
+在 Relay 服务器发布静态文件：
 
 ```bash
-cd web/client
-python3 -m http.server 8787
+sudo ./deploy/relay/linux/publish-web-static.sh
 ```
 
-浏览器打开 `http://127.0.0.1:8787`，手动输入：
+然后用 `deploy/nginx/openclaw-bridge.conf` 配置 Nginx（`root /var/www/openclaw-bridge-web;`），浏览器打开：
+
+```text
+https://YOUR_RELAY_DOMAIN/
+```
+
+页面里手动输入：
 
 - Relay WS URL（例如 `wss://YOUR_RELAY_DOMAIN/client`）
 - Access Code / Token（用于 CONNECT 的 `access_code`）

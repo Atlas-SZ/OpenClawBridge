@@ -15,6 +15,7 @@ Options:
   --config <path>                 Connector config path (default: /etc/openclaw-bridge/connector.json)
   --bin-dir <path>                Binary install directory (default: /usr/local/bin)
   --systemd-dir <path>            Systemd unit directory (default: /etc/systemd/system)
+  --web-root <path>               Web static root (default: /var/www/openclaw-bridge-web)
   -h, --help                      Show this help
 EOF
 }
@@ -39,6 +40,7 @@ ROLE=""
 CONFIG_PATH="/etc/openclaw-bridge/connector.json"
 BIN_DIR="/usr/local/bin"
 SYSTEMD_DIR="/etc/systemd/system"
+WEB_ROOT="/var/www/openclaw-bridge-web"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -56,6 +58,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --systemd-dir)
       SYSTEMD_DIR="${2:-}"
+      shift 2
+      ;;
+    --web-root)
+      WEB_ROOT="${2:-}"
       shift 2
       ;;
     -h|--help)
@@ -93,6 +99,10 @@ install_relay() {
 
   log "installing relay systemd unit"
   install -m 0644 "${REPO_ROOT}/deploy/systemd/openclaw-bridge-relay.service" "${SYSTEMD_DIR}/openclaw-bridge-relay.service"
+
+  log "publishing web static files to ${WEB_ROOT}"
+  install -d -m 755 "${WEB_ROOT}"
+  install -m 644 "${REPO_ROOT}/web/client/index.html" "${WEB_ROOT}/index.html"
 
   systemctl daemon-reload
   systemctl enable --now openclaw-bridge-relay
