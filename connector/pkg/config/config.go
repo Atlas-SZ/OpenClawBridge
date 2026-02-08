@@ -24,6 +24,9 @@ type GatewayConfig struct {
 	Client                  GatewayClientConfig `json:"client"`
 	MinProtocol             int                 `json:"min_protocol"`
 	MaxProtocol             int                 `json:"max_protocol"`
+	Scopes                  []string            `json:"scopes"`
+	Locale                  string              `json:"locale"`
+	UserAgent               string              `json:"user_agent"`
 	ChallengeTimeoutSeconds int                 `json:"challenge_timeout_seconds"`
 	ReconnectInitialSeconds int                 `json:"reconnect_initial_seconds"`
 	ReconnectMaxSeconds     int                 `json:"reconnect_max_seconds"`
@@ -38,6 +41,9 @@ type GatewayAuthConfig struct {
 type GatewayClientConfig struct {
 	ID          string `json:"id"`
 	DisplayName string `json:"displayName"`
+	Version     string `json:"version"`
+	Platform    string `json:"platform"`
+	Mode        string `json:"mode"`
 }
 
 func Load(path string) (Config, error) {
@@ -70,16 +76,34 @@ func Load(path string) (Config, error) {
 		cfg.Gateway.URL = "ws://127.0.0.1:18789"
 	}
 	if cfg.Gateway.Client.ID == "" {
-		cfg.Gateway.Client.ID = "bridge-connector"
+		cfg.Gateway.Client.ID = "cli"
 	}
 	if cfg.Gateway.Client.DisplayName == "" {
 		cfg.Gateway.Client.DisplayName = "OpenClaw Bridge Connector"
+	}
+	if cfg.Gateway.Client.Version == "" {
+		cfg.Gateway.Client.Version = "0.1.0"
+	}
+	if cfg.Gateway.Client.Platform == "" {
+		cfg.Gateway.Client.Platform = "linux"
+	}
+	if cfg.Gateway.Client.Mode == "" {
+		cfg.Gateway.Client.Mode = "operator"
 	}
 	if cfg.Gateway.MinProtocol <= 0 {
 		cfg.Gateway.MinProtocol = 3
 	}
 	if cfg.Gateway.MaxProtocol <= 0 {
 		cfg.Gateway.MaxProtocol = cfg.Gateway.MinProtocol
+	}
+	if len(cfg.Gateway.Scopes) == 0 {
+		cfg.Gateway.Scopes = []string{"operator.read", "operator.write"}
+	}
+	if cfg.Gateway.Locale == "" {
+		cfg.Gateway.Locale = "en-US"
+	}
+	if cfg.Gateway.UserAgent == "" {
+		cfg.Gateway.UserAgent = "openclaw-bridge-connector/0.1.0"
 	}
 	if cfg.Gateway.ChallengeTimeoutSeconds <= 0 {
 		cfg.Gateway.ChallengeTimeoutSeconds = 8

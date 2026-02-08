@@ -260,9 +260,15 @@ func (c *Client) performConnect(conn *websocket.Conn) error {
 			"client": map[string]any{
 				"id":          c.cfg.Client.ID,
 				"displayName": c.cfg.Client.DisplayName,
-				"role":        "operator",
+				"version":     c.cfg.Client.Version,
+				"platform":    c.cfg.Client.Platform,
+				"mode":        c.cfg.Client.Mode,
 			},
-			"caps": map[string]any{},
+			"role":      "operator",
+			"scopes":    c.cfg.Scopes,
+			"caps":      []any{},
+			"locale":    c.cfg.Locale,
+			"userAgent": c.cfg.UserAgent,
 		},
 	}
 

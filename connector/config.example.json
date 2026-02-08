@@ -12,11 +12,17 @@
       "token": "GATEWAY_AUTH_TOKEN"
     },
     "client": {
-      "id": "bridge-connector",
-      "displayName": "OpenClaw Bridge Connector"
+      "id": "cli",
+      "displayName": "OpenClaw Bridge Connector",
+      "version": "0.1.0",
+      "platform": "linux",
+      "mode": "operator"
     },
     "min_protocol": 3,
     "max_protocol": 3,
+    "scopes": ["operator.read", "operator.write"],
+    "locale": "en-US",
+    "user_agent": "openclaw-bridge-connector/0.1.0",
     "challenge_timeout_seconds": 8,
     "reconnect_initial_seconds": 1,
     "reconnect_max_seconds": 30,
