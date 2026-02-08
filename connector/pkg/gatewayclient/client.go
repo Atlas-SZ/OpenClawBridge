@@ -113,8 +113,10 @@ func (c *Client) SendUserMessage(sessionID, content string) error {
 	reqID := newID("gw_req_")
 	c.trackRequest(reqID, sessionID)
 
-	params := map[string]any{
-		"content": content,
+	params, err := c.buildSendParams(reqID, content)
+	if err != nil {
+		c.untrackRequest(reqID)
+		return err
 	}
 
 	msg := map[string]any{
@@ -129,6 +131,23 @@ func (c *Client) SendUserMessage(sessionID, content string) error {
 		return err
 	}
 	return nil
+}
+
+func (c *Client) buildSendParams(reqID, content string) (map[string]any, error) {
+	if requiresAddressedMessage(c.cfg.SendMethod) {
+		if strings.TrimSpace(c.cfg.SendTo) == "" {
+			return nil, fmt.Errorf("gateway.send_to is required when send_method=%s", c.cfg.SendMethod)
+		}
+		return map[string]any{
+			"to":             c.cfg.SendTo,
+			"message":        content,
+			"idempotencyKey": reqID,
+		}, nil
+	}
+
+	return map[string]any{
+		"content": content,
+	}, nil
 }
 
 func (c *Client) SendCancel(sessionID string) error {
@@ -559,6 +578,11 @@ func isConnectSchemaError(err error) bool {
 		strings.Contains(msg, "client/id") ||
 		strings.Contains(msg, "/client/mode") ||
 		strings.Contains(msg, "client/mode")
+}
+
+func requiresAddressedMessage(method string) bool {
+	m := strings.ToLower(strings.TrimSpace(method))
+	return m == "send" || strings.HasSuffix(m, ".send")
 }
 
 func decodePayload(raw json.RawMessage) map[string]any {

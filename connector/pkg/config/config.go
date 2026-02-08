@@ -31,6 +31,7 @@ type GatewayConfig struct {
 	ReconnectInitialSeconds int                 `json:"reconnect_initial_seconds"`
 	ReconnectMaxSeconds     int                 `json:"reconnect_max_seconds"`
 	SendMethod              string              `json:"send_method"`
+	SendTo                  string              `json:"send_to"`
 	CancelMethod            string              `json:"cancel_method"`
 }
 
