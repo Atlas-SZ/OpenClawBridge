@@ -39,6 +39,8 @@ type Client struct {
 
 	reqMu        sync.RWMutex
 	reqToSession map[string]string
+	reqToRun     map[string]string
+	runToReq     map[string]string
 
 	runMu        sync.RWMutex
 	runToSession map[string]string
@@ -71,6 +73,8 @@ func New(cfg config.GatewayConfig, logger *log.Logger, handlers Handlers) *Clien
 		logger:       logger,
 		handlers:     handlers,
 		reqToSession: make(map[string]string),
+		reqToRun:     make(map[string]string),
+		runToReq:     make(map[string]string),
 		runToSession: make(map[string]string),
 		runLastText:  make(map[string]string),
 	}
@@ -141,6 +145,14 @@ func (c *Client) SendUserMessage(sessionID, content string) error {
 }
 
 func (c *Client) buildSendParams(sessionID, reqID, content string) (map[string]any, error) {
+	if isAgentMethod(c.cfg.SendMethod) {
+		return map[string]any{
+			"sessionKey":     gatewaySessionKey(sessionID),
+			"message":        content,
+			"idempotencyKey": reqID,
+		}, nil
+	}
+
 	if isChatSendMethod(c.cfg.SendMethod) {
 		return map[string]any{
 			"sessionKey":     gatewaySessionKey(sessionID),
@@ -427,10 +439,46 @@ func (c *Client) handleResponse(env envelope) error {
 			c.trackRun(runID, sessionID)
 		}
 		if strings.HasPrefix(env.ID, "gw_req_") {
+			status := strings.ToLower(stringValue(payload["status"]))
+			if isPendingStatus(status) {
+				if runID != "" {
+					c.linkRequestRun(env.ID, runID)
+				}
+				return nil
+			}
+
 			if content := extractChatText(payload); content != "" {
 				c.emitEvent(sessionID, protocol.Event{Type: protocol.EventToken, Content: content})
+			}
+
+			if isErrorStatus(status) {
+				msg := extractErrorMessageFromPayload(payload)
+				if msg == "" || msg == "gateway event error" {
+					msg = "gateway request failed"
+				}
+				c.emitEvent(sessionID, protocol.Event{
+					Type:    protocol.EventError,
+					Code:    "GATEWAY_REQUEST_FAILED",
+					Message: msg,
+				})
 				c.emitEvent(sessionID, protocol.Event{Type: protocol.EventEnd})
-			} else if runID == "" {
+				c.untrackRequest(env.ID)
+				if runID != "" {
+					c.clearRun(runID)
+				}
+				return nil
+			}
+
+			if isFinalStatus(status) {
+				c.emitEvent(sessionID, protocol.Event{Type: protocol.EventEnd})
+				c.untrackRequest(env.ID)
+				if runID != "" {
+					c.clearRun(runID)
+				}
+				return nil
+			}
+
+			if runID == "" {
 				c.emitEvent(sessionID, protocol.Event{
 					Type:    protocol.EventError,
 					Code:    "GATEWAY_NO_OUTPUT",
@@ -633,6 +681,10 @@ func (c *Client) requestSession(reqID string) (string, bool) {
 func (c *Client) untrackRequest(reqID string) {
 	c.reqMu.Lock()
 	defer c.reqMu.Unlock()
+	if runID, ok := c.reqToRun[reqID]; ok {
+		delete(c.reqToRun, reqID)
+		delete(c.runToReq, runID)
+	}
 	delete(c.reqToSession, reqID)
 }
 
@@ -680,10 +732,25 @@ func (c *Client) setRunLastText(runID, text string) {
 }
 
 func (c *Client) clearRun(runID string) {
+	c.reqMu.Lock()
+	if reqID, ok := c.runToReq[runID]; ok {
+		delete(c.runToReq, runID)
+		delete(c.reqToRun, reqID)
+		delete(c.reqToSession, reqID)
+	}
+	c.reqMu.Unlock()
+
 	c.runMu.Lock()
 	defer c.runMu.Unlock()
 	delete(c.runToSession, runID)
 	delete(c.runLastText, runID)
+}
+
+func (c *Client) linkRequestRun(reqID, runID string) {
+	c.reqMu.Lock()
+	defer c.reqMu.Unlock()
+	c.reqToRun[reqID] = runID
+	c.runToReq[runID] = reqID
 }
 
 func (c *Client) setConn(conn *websocket.Conn) {
@@ -820,6 +887,11 @@ func requiresAddressedMessage(method string) bool {
 func isChatSendMethod(method string) bool {
 	m := normalizeMethod(method)
 	return m == "chat.send" || strings.HasSuffix(m, ".chat.send")
+}
+
+func isAgentMethod(method string) bool {
+	m := normalizeMethod(method)
+	return m == "agent" || strings.HasSuffix(m, ".agent")
 }
 
 func isChatAbortMethod(method string) bool {
@@ -1028,4 +1100,31 @@ func stringValue(v any) string {
 
 func newID(prefix string) string {
 	return fmt.Sprintf("%s%d", prefix, time.Now().UnixNano())
+}
+
+func isPendingStatus(status string) bool {
+	switch status {
+	case "accepted", "queued", "started", "running", "in_flight", "inflight", "pending":
+		return true
+	default:
+		return false
+	}
+}
+
+func isFinalStatus(status string) bool {
+	switch status {
+	case "ok", "done", "completed", "final", "ended", "end", "aborted", "cancelled", "canceled":
+		return true
+	default:
+		return false
+	}
+}
+
+func isErrorStatus(status string) bool {
+	switch status {
+	case "error", "failed":
+		return true
+	default:
+		return false
+	}
 }

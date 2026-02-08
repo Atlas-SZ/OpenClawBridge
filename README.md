@@ -107,7 +107,7 @@ cp connector/config.example.json /etc/openclaw-bridge/connector.json
 
 如果你的 Gateway 方法名不是默认值，调整：
 
-- `gateway.send_method`（默认 `chat.send`）
+- `gateway.send_method`（默认 `agent`）
 - `gateway.cancel_method`（默认 `chat.abort`）
 - `gateway.send_to`（仅在你把 `send_method` 改回 `send` 时才使用，默认 `remote`）
 
@@ -185,7 +185,7 @@ systemctl status openclaw-bridge-connector
       "id": "bridge-connector",
       "displayName": "OpenClaw Bridge Connector"
     },
-    "send_method": "chat.send",
+    "send_method": "agent",
     "cancel_method": "chat.abort"
   }
 }
@@ -241,14 +241,14 @@ go build -o /tmp/openclaw-cli ./cli
 
 - 说明你仍在走 `send` 通道协议
 - 推荐改回默认：
-  - `gateway.send_method = "chat.send"`
+  - `gateway.send_method = "agent"`
   - `gateway.cancel_method = "chat.abort"`
 - 只有明确要走 `send` 通道时，才配置 `gateway.send_to`
 
 ### 出现 WhatsApp target 报错
 
 - 这是 `send` 通道在尝试投递 WhatsApp
-- 用户侧对话应使用 `chat.send`，而不是 `send`
+- 用户侧对话应使用 `agent`（或 `chat.send`），而不是 `send`
 
 ### 发送后无报错但一直等待
 
