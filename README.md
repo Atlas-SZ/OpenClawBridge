@@ -130,20 +130,6 @@ systemctl enable --now openclaw-bridge-connector
 - `unknown method ...`：`send_method` 拼写错误，推荐保持 `agent`。
 - 发送后长时间无返回：用 `-response-timeout` 防止 CLI 无限制等待，并查看 Connector/Gateway 日志。
 
-## 导出当前服务器配置（给我排查用）
-
-不要在命令前加 `cat`，直接执行下面这些命令：
-
-```bash
-cat /etc/openclaw-bridge/connector.json
-systemctl cat openclaw-bridge-connector.service
-systemctl cat openclaw-bridge-relay.service
-systemctl --user cat openclaw-gateway.service
-cat /etc/nginx/conf.d/openclaw-bridge.conf
-journalctl -u openclaw-bridge-connector -n 80 --no-pager
-journalctl --user -u openclaw-gateway.service -n 80 --no-pager
-```
-
 ## 文档
 
 - 协议：`docs/protocol.md`
