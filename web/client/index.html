@@ -1,0 +1,682 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OpenClawBridge Web Client</title>
+    <style>
+      :root {
+        --bg-0: #f2efe8;
+        --bg-1: #e2ddcf;
+        --ink-0: #171919;
+        --ink-1: #3d4141;
+        --accent-0: #0d7d77;
+        --accent-1: #ba5a2b;
+        --line: #1f2e2d33;
+        --panel: #fff9efcc;
+        --ok: #1f8a55;
+        --warn: #a55a1f;
+        --err: #9f2d2d;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: "IBM Plex Sans", "Avenir Next", "Segoe UI", sans-serif;
+        color: var(--ink-0);
+        background:
+          radial-gradient(circle at 8% 5%, #0d7d7720 0, transparent 32%),
+          radial-gradient(circle at 93% 12%, #ba5a2b1f 0, transparent 30%),
+          linear-gradient(150deg, var(--bg-0), var(--bg-1));
+      }
+
+      .page {
+        width: min(1200px, 100% - 36px);
+        margin: 24px auto;
+        display: grid;
+        gap: 16px;
+      }
+
+      .title {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 12px;
+      }
+
+      .title h1 {
+        margin: 0;
+        font-size: clamp(1.25rem, 2vw, 1.9rem);
+        letter-spacing: 0.02em;
+      }
+
+      .status {
+        font-family: "IBM Plex Mono", "Menlo", monospace;
+        font-size: 0.9rem;
+        color: var(--ink-1);
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: 1.1fr 0.9fr;
+        gap: 16px;
+      }
+
+      .card {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        backdrop-filter: blur(6px);
+        box-shadow: 0 8px 30px #0e131211;
+      }
+
+      .card h2 {
+        margin: 0;
+        padding: 12px 14px;
+        border-bottom: 1px dashed var(--line);
+        font-size: 0.92rem;
+        text-transform: uppercase;
+        letter-spacing: 0.09em;
+      }
+
+      .card-body {
+        padding: 14px;
+        display: grid;
+        gap: 10px;
+      }
+
+      .row {
+        display: grid;
+        gap: 8px;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      label {
+        display: grid;
+        gap: 6px;
+        font-size: 0.82rem;
+        color: var(--ink-1);
+      }
+
+      input,
+      textarea,
+      button {
+        font: inherit;
+      }
+
+      input,
+      textarea {
+        width: 100%;
+        border: 1px solid #30424133;
+        border-radius: 10px;
+        padding: 9px 10px;
+        background: #fffcf6d6;
+        color: var(--ink-0);
+      }
+
+      textarea {
+        min-height: 88px;
+        resize: vertical;
+      }
+
+      .mono {
+        font-family: "IBM Plex Mono", "Menlo", monospace;
+      }
+
+      .buttons {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      button {
+        border: 0;
+        border-radius: 999px;
+        padding: 9px 14px;
+        cursor: pointer;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+      }
+
+      .primary {
+        color: #fff;
+        background: linear-gradient(135deg, var(--accent-0), #0d5f5a);
+      }
+
+      .secondary {
+        color: #fff;
+        background: linear-gradient(135deg, var(--accent-1), #8d4220);
+      }
+
+      .ghost {
+        color: var(--ink-0);
+        background: #fff;
+        border: 1px solid #24333133;
+      }
+
+      .output {
+        background: #161c1bd9;
+        color: #d5ebe7;
+        border-radius: 10px;
+        padding: 12px;
+        min-height: 220px;
+        max-height: 360px;
+        overflow: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      .event-log {
+        min-height: 240px;
+        max-height: 560px;
+      }
+
+      .hint {
+        margin: 0;
+        font-size: 0.8rem;
+        color: var(--ink-1);
+      }
+
+      .ok {
+        color: var(--ok);
+      }
+
+      .warn {
+        color: var(--warn);
+      }
+
+      .err {
+        color: var(--err);
+      }
+
+      @media (max-width: 980px) {
+        .grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <div class="title">
+        <h1>OpenClawBridge Web Test Client</h1>
+        <div id="connStatus" class="status">disconnected</div>
+      </div>
+
+      <div class="grid">
+        <section class="card">
+          <h2>Connect</h2>
+          <div class="card-body">
+            <div class="row">
+              <label>
+                Relay WS URL
+                <input id="relayUrl" class="mono" value="wss://bridge.claw.qinfei.top/client" />
+              </label>
+              <label>
+                Access Code (CONNECT.access_code)
+                <input id="accessCode" class="mono" placeholder="A-123456" />
+              </label>
+            </div>
+            <div class="buttons">
+              <button id="connectBtn" class="primary">Connect</button>
+              <button id="disconnectBtn" class="ghost">Disconnect</button>
+            </div>
+            <p class="hint">session_id will be created by relay after CONNECT_OK.</p>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2>Session</h2>
+          <div class="card-body">
+            <label>
+              Current session_id
+              <input id="sessionId" class="mono" readonly />
+            </label>
+            <label>
+              Stream Output
+              <div id="streamOutput" class="output mono"></div>
+            </label>
+          </div>
+        </section>
+      </div>
+
+      <div class="grid">
+        <section class="card">
+          <h2>Send Event</h2>
+          <div class="card-body">
+            <label>
+              Text message
+              <textarea id="messageInput" placeholder="Type message for user_message event"></textarea>
+            </label>
+
+            <div class="row">
+              <label>
+                to (for send/send.* methods)
+                <input id="toInput" class="mono" placeholder="+15551234567 or group id" />
+              </label>
+              <label>
+                channel (optional)
+                <input id="channelInput" class="mono" placeholder="whatsapp / telegram / ..." />
+              </label>
+            </div>
+
+            <div class="row">
+              <label>
+                accountId (optional)
+                <input id="accountIdInput" class="mono" />
+              </label>
+              <label>
+                sessionKey mirror (optional)
+                <input id="sessionKeyInput" class="mono" />
+              </label>
+            </div>
+
+            <div class="row">
+              <label>
+                mediaUrl (optional)
+                <input id="mediaUrlInput" class="mono" placeholder="https://..." />
+              </label>
+              <label>
+                mediaUrls (comma/newline separated)
+                <textarea id="mediaUrlsInput" class="mono" placeholder="https://a\nhttps://b"></textarea>
+              </label>
+            </div>
+
+            <label>
+              Attachments (base64 will be generated in-browser)
+              <input id="fileInput" type="file" multiple />
+            </label>
+
+            <div class="buttons">
+              <button id="sendBtn" class="primary">Send user_message</button>
+              <button id="stopBtn" class="secondary">Send control.stop</button>
+            </div>
+
+            <label>
+              Raw JSON event override (prefix-free)
+              <textarea id="rawEventInput" class="mono" placeholder='{"type":"user_message","content":"hello"}'></textarea>
+            </label>
+            <div class="buttons">
+              <button id="sendRawBtn" class="ghost">Send raw JSON event</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2>Events</h2>
+          <div class="card-body">
+            <div id="eventLog" class="output event-log mono"></div>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <script>
+      const encoder = new TextEncoder();
+      const decoder = new TextDecoder();
+
+      const relayUrlEl = document.getElementById("relayUrl");
+      const accessCodeEl = document.getElementById("accessCode");
+      const sessionIdEl = document.getElementById("sessionId");
+      const connStatusEl = document.getElementById("connStatus");
+      const streamOutputEl = document.getElementById("streamOutput");
+      const eventLogEl = document.getElementById("eventLog");
+
+      const messageInputEl = document.getElementById("messageInput");
+      const toInputEl = document.getElementById("toInput");
+      const channelInputEl = document.getElementById("channelInput");
+      const accountIdInputEl = document.getElementById("accountIdInput");
+      const sessionKeyInputEl = document.getElementById("sessionKeyInput");
+      const mediaUrlInputEl = document.getElementById("mediaUrlInput");
+      const mediaUrlsInputEl = document.getElementById("mediaUrlsInput");
+      const fileInputEl = document.getElementById("fileInput");
+      const rawEventInputEl = document.getElementById("rawEventInput");
+
+      const connectBtn = document.getElementById("connectBtn");
+      const disconnectBtn = document.getElementById("disconnectBtn");
+      const sendBtn = document.getElementById("sendBtn");
+      const stopBtn = document.getElementById("stopBtn");
+      const sendRawBtn = document.getElementById("sendRawBtn");
+
+      let ws = null;
+      let sessionId = "";
+
+      function setStatus(text, cls = "") {
+        connStatusEl.textContent = text;
+        connStatusEl.className = `status ${cls}`.trim();
+      }
+
+      function logLine(msg) {
+        const line = `[${new Date().toLocaleTimeString()}] ${msg}`;
+        eventLogEl.textContent += line + "\n";
+        eventLogEl.scrollTop = eventLogEl.scrollHeight;
+      }
+
+      function appendStream(text) {
+        streamOutputEl.textContent += text;
+        streamOutputEl.scrollTop = streamOutputEl.scrollHeight;
+      }
+
+      function resetSession() {
+        sessionId = "";
+        sessionIdEl.value = "";
+      }
+
+      function connect() {
+        if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+          logLine("already connected/connecting");
+          return;
+        }
+
+        const relayUrl = relayUrlEl.value.trim();
+        const accessCode = accessCodeEl.value.trim();
+
+        if (!relayUrl) {
+          logLine("relay url is required");
+          return;
+        }
+        if (!accessCode) {
+          logLine("access code is required");
+          return;
+        }
+
+        setStatus("connecting...", "warn");
+        resetSession();
+
+        ws = new WebSocket(relayUrl);
+        ws.binaryType = "arraybuffer";
+
+        ws.onopen = () => {
+          const connectPayload = {
+            type: "CONNECT",
+            v: 1,
+            access_code: accessCode,
+            e2ee: false,
+          };
+          ws.send(JSON.stringify(connectPayload));
+          logLine("CONNECT sent");
+        };
+
+        ws.onclose = (ev) => {
+          setStatus(`closed (${ev.code})`, ev.code === 1000 ? "" : "warn");
+          logLine(`socket closed code=${ev.code} reason=${ev.reason || "n/a"}`);
+          resetSession();
+          ws = null;
+        };
+
+        ws.onerror = () => {
+          setStatus("socket error", "err");
+          logLine("socket error");
+        };
+
+        ws.onmessage = async (ev) => {
+          if (typeof ev.data === "string") {
+            handleControlFrame(ev.data);
+            return;
+          }
+
+          let buf;
+          if (ev.data instanceof ArrayBuffer) {
+            buf = ev.data;
+          } else if (ev.data instanceof Blob) {
+            buf = await ev.data.arrayBuffer();
+          } else {
+            logLine("unknown message data type");
+            return;
+          }
+
+          handleDataFrame(buf);
+        };
+      }
+
+      function disconnect() {
+        if (!ws) {
+          return;
+        }
+        ws.close(1000, "manual close");
+      }
+
+      function handleControlFrame(text) {
+        let msg;
+        try {
+          msg = JSON.parse(text);
+        } catch {
+          logLine(`control non-json: ${text}`);
+          return;
+        }
+
+        if (msg.type === "CONNECT_OK") {
+          sessionId = msg.session_id || "";
+          sessionIdEl.value = sessionId;
+          setStatus("connected", "ok");
+          logLine(`CONNECT_OK sid=${sessionId}`);
+          return;
+        }
+
+        if (msg.type === "ERROR") {
+          logLine(`relay error code=${msg.code || ""} message=${msg.message || ""}`);
+          return;
+        }
+
+        if (msg.type === "CLOSE_SESSION") {
+          logLine(`session closed sid=${msg.session_id || ""}`);
+          if (msg.session_id && msg.session_id === sessionId) {
+            resetSession();
+          }
+          return;
+        }
+
+        logLine(`control ${JSON.stringify(msg)}`);
+      }
+
+      function buildDataFrame(sid, flags, payloadBytes) {
+        const sidBytes = encoder.encode(sid);
+        if (!sidBytes.length || sidBytes.length > 255) {
+          throw new Error("invalid session_id");
+        }
+
+        const frame = new Uint8Array(1 + sidBytes.length + 1 + payloadBytes.length);
+        frame[0] = sidBytes.length;
+        frame.set(sidBytes, 1);
+        frame[1 + sidBytes.length] = flags;
+        frame.set(payloadBytes, 1 + sidBytes.length + 1);
+        return frame;
+      }
+
+      function parseDataFrame(buffer) {
+        const frame = new Uint8Array(buffer);
+        if (frame.length < 3) {
+          throw new Error("frame too short");
+        }
+
+        const sidLen = frame[0];
+        if (!sidLen || frame.length < 1 + sidLen + 1) {
+          throw new Error("invalid frame header");
+        }
+
+        const sid = decoder.decode(frame.slice(1, 1 + sidLen));
+        const flags = frame[1 + sidLen];
+        const payload = frame.slice(1 + sidLen + 1);
+        return { sid, flags, payload };
+      }
+
+      function summarizeEvent(event) {
+        const clone = JSON.parse(JSON.stringify(event));
+        if (Array.isArray(clone.attachments)) {
+          clone.attachments = clone.attachments.map((a) => {
+            if (a && typeof a.content === "string") {
+              return { ...a, content: `<base64:${a.content.length}>` };
+            }
+            return a;
+          });
+        }
+        return clone;
+      }
+
+      function handleDataFrame(buffer) {
+        let parsed;
+        try {
+          parsed = parseDataFrame(buffer);
+        } catch (err) {
+          logLine(`bad data frame: ${err.message}`);
+          return;
+        }
+
+        if (!sessionId || parsed.sid !== sessionId) {
+          return;
+        }
+
+        let event;
+        try {
+          event = JSON.parse(decoder.decode(parsed.payload));
+        } catch (err) {
+          logLine(`bad event payload: ${err.message}`);
+          return;
+        }
+
+        const compact = summarizeEvent(event);
+        logLine(`event ${JSON.stringify(compact)}`);
+
+        switch (event.type) {
+          case "token":
+            appendStream(event.content || "");
+            break;
+          case "end":
+            appendStream("\n");
+            break;
+          case "error":
+            appendStream(`\n[error] ${event.code || ""} ${event.message || ""}\n`);
+            break;
+          case "media":
+            if (Array.isArray(event.media)) {
+              for (const item of event.media) {
+                appendStream(`\n[media] ${item.type || "file"} ${item.url || item.fileName || ""}`);
+              }
+              appendStream("\n");
+            }
+            break;
+          default:
+            break;
+        }
+      }
+
+      function splitMediaUrls(raw) {
+        return raw
+          .split(/[\n,]/g)
+          .map((s) => s.trim())
+          .filter(Boolean);
+      }
+
+      function readFileAsBase64(file) {
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const result = String(reader.result || "");
+            const i = result.indexOf(",");
+            resolve(i >= 0 ? result.slice(i + 1) : result);
+          };
+          reader.onerror = () => reject(reader.error || new Error("read file failed"));
+          reader.readAsDataURL(file);
+        });
+      }
+
+      function mediaTypeFromMime(mime) {
+        if (!mime) return "file";
+        if (mime.startsWith("image/")) return "image";
+        if (mime.startsWith("audio/")) return "audio";
+        if (mime.startsWith("video/")) return "video";
+        return "file";
+      }
+
+      async function buildAttachments(files) {
+        const out = [];
+        for (const f of files) {
+          const content = await readFileAsBase64(f);
+          out.push({
+            type: mediaTypeFromMime(f.type || ""),
+            mimeType: f.type || "application/octet-stream",
+            fileName: f.name,
+            content,
+          });
+        }
+        return out;
+      }
+
+      function ensureReadyToSend() {
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          throw new Error("websocket not connected");
+        }
+        if (!sessionId) {
+          throw new Error("session_id not ready (wait CONNECT_OK)");
+        }
+      }
+
+      async function sendEvent(eventObj) {
+        ensureReadyToSend();
+        const payload = encoder.encode(JSON.stringify(eventObj));
+        const frame = buildDataFrame(sessionId, 0, payload);
+        ws.send(frame);
+      }
+
+      async function sendUserMessage() {
+        try {
+          const attachments = await buildAttachments(fileInputEl.files || []);
+          const eventObj = {
+            type: "user_message",
+            content: messageInputEl.value,
+          };
+
+          if (attachments.length) eventObj.attachments = attachments;
+          if (toInputEl.value.trim()) eventObj.to = toInputEl.value.trim();
+          if (channelInputEl.value.trim()) eventObj.channel = channelInputEl.value.trim();
+          if (accountIdInputEl.value.trim()) eventObj.accountId = accountIdInputEl.value.trim();
+          if (sessionKeyInputEl.value.trim()) eventObj.sessionKey = sessionKeyInputEl.value.trim();
+          if (mediaUrlInputEl.value.trim()) eventObj.mediaUrl = mediaUrlInputEl.value.trim();
+
+          const mediaUrls = splitMediaUrls(mediaUrlsInputEl.value);
+          if (mediaUrls.length) eventObj.mediaUrls = mediaUrls;
+
+          await sendEvent(eventObj);
+          logLine("sent user_message event");
+        } catch (err) {
+          logLine(`send failed: ${err.message}`);
+        }
+      }
+
+      async function sendRawEvent() {
+        try {
+          const raw = rawEventInputEl.value.trim();
+          if (!raw) {
+            throw new Error("raw json is empty");
+          }
+          const eventObj = JSON.parse(raw);
+          await sendEvent(eventObj);
+          logLine(`sent raw event type=${eventObj.type || "n/a"}`);
+        } catch (err) {
+          logLine(`raw send failed: ${err.message}`);
+        }
+      }
+
+      async function sendStop() {
+        try {
+          await sendEvent({ type: "control", action: "stop" });
+          logLine("sent control.stop");
+        } catch (err) {
+          logLine(`stop failed: ${err.message}`);
+        }
+      }
+
+      connectBtn.addEventListener("click", connect);
+      disconnectBtn.addEventListener("click", disconnect);
+      sendBtn.addEventListener("click", sendUserMessage);
+      sendRawBtn.addEventListener("click", sendRawEvent);
+      stopBtn.addEventListener("click", sendStop);
+
+      setStatus("disconnected");
+    </script>
+  </body>
+</html>

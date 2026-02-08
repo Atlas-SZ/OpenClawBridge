@@ -119,6 +119,28 @@ CLI 也支持 `json:` 前缀发送完整事件（可用于附件/媒体字段测
 - `-reconnect=true|false`（默认 `true`，断线自动重连）
 - `-reconnect-delay 2s`（重连间隔）
 
+### 5) 用户侧（Web 验收页）
+
+仓库内提供单文件 Web 客户端：`web/client/index.html`。
+
+启动本地静态服务（任选其一）：
+
+```bash
+cd web/client
+python3 -m http.server 8787
+```
+
+浏览器打开 `http://127.0.0.1:8787`，手动输入：
+
+- Relay WS URL（例如 `wss://YOUR_RELAY_DOMAIN/client`）
+- Access Code / Token（用于 CONNECT 的 `access_code`）
+
+页面支持：
+
+- 文本 `user_message`
+- 附件（浏览器内转 base64，走 `attachments` 字段）
+- Raw JSON 事件发送（便于调试富媒体字段）
+
 ## Release 包内容
 
 自动打包的压缩包结构（所有平台统一）：
@@ -177,6 +199,27 @@ systemctl enable --now openclaw-bridge-connector
 - `missing scope: operator.admin`：Connector 会自动尝试补 admin scope；若仍失败，说明 token 本身无该权限。
 - `unknown method ...`：`send_method` 拼写错误，推荐保持 `agent`。
 - 发送后长时间无返回：用 `-response-timeout` 防止 CLI 无限制等待，并查看 Connector/Gateway 日志。
+
+macOS 提示“二进制已损坏/不安全，无法打开”时：
+
+1. 先校验下载包哈希是否与 Release 页 `SHA256SUMS.txt` 一致。
+2. 去除隔离属性（quarantine）后再执行：
+
+```bash
+# 以下载目录为例
+xattr -dr com.apple.quarantine /path/to/openclaw-bridge-darwin-*/
+chmod +x /path/to/openclaw-bridge-darwin-*/relay/openclaw-relay
+chmod +x /path/to/openclaw-bridge-darwin-*/connector/openclaw-connector
+chmod +x /path/to/openclaw-bridge-darwin-*/cli/openclaw-cli
+```
+
+3. 若企业策略仍拦截，可做本地 ad-hoc 签名（仅本机信任）：
+
+```bash
+codesign --force --sign - /path/to/openclaw-bridge-darwin-*/relay/openclaw-relay
+codesign --force --sign - /path/to/openclaw-bridge-darwin-*/connector/openclaw-connector
+codesign --force --sign - /path/to/openclaw-bridge-darwin-*/cli/openclaw-cli
+```
 
 ## 文档
 
