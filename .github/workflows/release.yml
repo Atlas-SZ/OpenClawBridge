@@ -63,22 +63,35 @@ jobs:
           go build -trimpath -ldflags "-s -w" -o "dist/openclaw-cli${{ matrix.ext }}" ./cli
 
           pkg="openclaw-bridge-${{ matrix.goos }}-${{ matrix.goarch }}"
-          mkdir -p "package/$pkg"
-          cp dist/openclaw-relay${{ matrix.ext }} "package/$pkg/"
-          cp dist/openclaw-connector${{ matrix.ext }} "package/$pkg/"
-          cp dist/openclaw-cli${{ matrix.ext }} "package/$pkg/"
-          cp README.md LICENSE "package/$pkg/"
-          mkdir -p "package/$pkg/deploy/systemd" "package/$pkg/deploy/nginx" "package/$pkg/deploy/scripts" "package/$pkg/deploy/cli"
-          cp deploy/systemd/openclaw-bridge-relay.service "package/$pkg/deploy/systemd/"
-          cp deploy/systemd/openclaw-bridge-connector.service "package/$pkg/deploy/systemd/"
-          cp deploy/nginx/openclaw-bridge.conf "package/$pkg/deploy/nginx/"
-          cp deploy/install.sh "package/$pkg/deploy/scripts/"
-          cp deploy/cli/start-cli.sh "package/$pkg/deploy/cli/"
-          cp deploy/cli/start-cli.cmd "package/$pkg/deploy/cli/"
-          cp deploy/cli/start-cli.ps1 "package/$pkg/deploy/cli/"
-          chmod +x "package/$pkg/deploy/scripts/install.sh" "package/$pkg/deploy/cli/start-cli.sh"
+          root="package/${pkg}"
 
-          tar -C package -czf "dist/${pkg}.tar.gz" "$pkg"
+          mkdir -p "${root}/relay/bin" "${root}/relay/scripts"
+          mkdir -p "${root}/connector/bin" "${root}/connector/scripts" "${root}/connector/config"
+          mkdir -p "${root}/cli/bin" "${root}/cli/scripts"
+
+          cp dist/openclaw-relay${{ matrix.ext }} "${root}/relay/bin/openclaw-relay"
+          cp dist/openclaw-connector${{ matrix.ext }} "${root}/connector/bin/openclaw-connector"
+          cp dist/openclaw-cli${{ matrix.ext }} "${root}/cli/bin/openclaw-cli"
+          cp connector/config.example.json "${root}/connector/config/connector.json.example"
+          cp README.md LICENSE "${root}/"
+
+          if [[ '${{ matrix.goos }}' == 'linux' ]]; then
+            mkdir -p "${root}/relay/systemd" "${root}/relay/nginx" "${root}/connector/systemd"
+            cp deploy/systemd/openclaw-bridge-relay.service "${root}/relay/systemd/"
+            cp deploy/systemd/openclaw-bridge-connector.service "${root}/connector/systemd/"
+            cp deploy/nginx/openclaw-bridge.conf "${root}/relay/nginx/"
+            cp deploy/relay/linux/*.sh "${root}/relay/scripts/"
+            cp deploy/connector/linux/*.sh "${root}/connector/scripts/"
+            cp deploy/cli/linux/*.sh "${root}/cli/scripts/"
+          else
+            cp deploy/relay/macos/*.sh "${root}/relay/scripts/"
+            cp deploy/connector/macos/*.sh "${root}/connector/scripts/"
+            cp deploy/cli/macos/*.sh "${root}/cli/scripts/"
+          fi
+
+          find "${root}" -type f -name "*.sh" -exec chmod +x {} +
+
+          tar -C package -czf "dist/${pkg}.tar.gz" "${pkg}"
 
       - name: Build binaries (windows)
         if: matrix.os == 'windows-latest'
@@ -96,25 +109,28 @@ jobs:
           go build -trimpath -ldflags "-s -w" -o "dist/openclaw-cli${{ matrix.ext }}" ./cli
 
           $pkg = "openclaw-bridge-${{ matrix.goos }}-${{ matrix.goarch }}"
-          New-Item -ItemType Directory -Path "package/$pkg" -Force | Out-Null
-          New-Item -ItemType Directory -Path "package/$pkg/deploy/systemd" -Force | Out-Null
-          New-Item -ItemType Directory -Path "package/$pkg/deploy/nginx" -Force | Out-Null
-          New-Item -ItemType Directory -Path "package/$pkg/deploy/scripts" -Force | Out-Null
-          New-Item -ItemType Directory -Path "package/$pkg/deploy/cli" -Force | Out-Null
-          Copy-Item "dist/openclaw-relay${{ matrix.ext }}" "package/$pkg/"
-          Copy-Item "dist/openclaw-connector${{ matrix.ext }}" "package/$pkg/"
-          Copy-Item "dist/openclaw-cli${{ matrix.ext }}" "package/$pkg/"
-          Copy-Item "README.md" "package/$pkg/"
-          Copy-Item "LICENSE" "package/$pkg/"
-          Copy-Item "deploy/systemd/openclaw-bridge-relay.service" "package/$pkg/deploy/systemd/"
-          Copy-Item "deploy/systemd/openclaw-bridge-connector.service" "package/$pkg/deploy/systemd/"
-          Copy-Item "deploy/nginx/openclaw-bridge.conf" "package/$pkg/deploy/nginx/"
-          Copy-Item "deploy/install.sh" "package/$pkg/deploy/scripts/"
-          Copy-Item "deploy/cli/start-cli.sh" "package/$pkg/deploy/cli/"
-          Copy-Item "deploy/cli/start-cli.cmd" "package/$pkg/deploy/cli/"
-          Copy-Item "deploy/cli/start-cli.ps1" "package/$pkg/deploy/cli/"
+          $root = "package/$pkg"
 
-          Compress-Archive -Path "package/$pkg/*" -DestinationPath "dist/$pkg.zip" -Force
+          New-Item -ItemType Directory -Path "$root/relay/bin" -Force | Out-Null
+          New-Item -ItemType Directory -Path "$root/relay/scripts" -Force | Out-Null
+          New-Item -ItemType Directory -Path "$root/connector/bin" -Force | Out-Null
+          New-Item -ItemType Directory -Path "$root/connector/scripts" -Force | Out-Null
+          New-Item -ItemType Directory -Path "$root/connector/config" -Force | Out-Null
+          New-Item -ItemType Directory -Path "$root/cli/bin" -Force | Out-Null
+          New-Item -ItemType Directory -Path "$root/cli/scripts" -Force | Out-Null
+
+          Copy-Item "dist/openclaw-relay${{ matrix.ext }}" "$root/relay/bin/openclaw-relay.exe"
+          Copy-Item "dist/openclaw-connector${{ matrix.ext }}" "$root/connector/bin/openclaw-connector.exe"
+          Copy-Item "dist/openclaw-cli${{ matrix.ext }}" "$root/cli/bin/openclaw-cli.exe"
+          Copy-Item "connector/config.example.json" "$root/connector/config/connector.json.example"
+          Copy-Item "README.md" "$root/"
+          Copy-Item "LICENSE" "$root/"
+
+          Copy-Item "deploy/relay/windows/*" "$root/relay/scripts/"
+          Copy-Item "deploy/connector/windows/*" "$root/connector/scripts/"
+          Copy-Item "deploy/cli/windows/*" "$root/cli/scripts/"
+
+          Compress-Archive -Path "$root/*" -DestinationPath "dist/$pkg.zip" -Force
 
       - name: Upload package (tar.gz)
         if: matrix.archive == 'tar.gz'

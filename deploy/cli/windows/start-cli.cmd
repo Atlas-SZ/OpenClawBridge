@@ -12,7 +12,7 @@ if "%RELAY_URL%"=="" goto usage
 if "%ACCESS_CODE%"=="" goto usage
 if "%RESPONSE_TIMEOUT%"=="" set "RESPONSE_TIMEOUT=30s"
 
-set "BIN_PATH=%~dp0..\..\openclaw-cli.exe"
+set "BIN_PATH=%~dp0..\bin\openclaw-cli.exe"
 if not exist "%BIN_PATH%" (
   echo openclaw-cli not found: %BIN_PATH%
   exit /b 1
@@ -24,6 +24,4 @@ exit /b %ERRORLEVEL%
 :usage
 echo Usage:
 echo   start-cli.cmd ^<relay-url^> ^<access-code^> [response-timeout]
-echo Example:
-echo   start-cli.cmd wss://bridge.example.com/client A-123456 30s
 exit /b 1
