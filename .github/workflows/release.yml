@@ -27,6 +27,11 @@ jobs:
             goarch: amd64
             ext: ""
             archive: tar.gz
+          - os: macos-latest
+            goos: darwin
+            goarch: arm64
+            ext: ""
+            archive: tar.gz
           - os: windows-latest
             goos: windows
             goarch: amd64

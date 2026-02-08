@@ -137,7 +137,7 @@ systemctl enable --now openclaw-bridge-connector
 仓库包含自动发版工作流：`.github/workflows/release.yml`。
 
 - 触发方式：推送 tag（例如 `v0.1.0`）
-- 产物内容：Linux/macOS/Windows 的打包二进制（relay/connector/cli）+ `SHA256SUMS.txt`
+- 产物内容：Linux/macOS（amd64 + arm64）/Windows 的打包二进制（relay/connector/cli）+ `SHA256SUMS.txt`
 - 发布位置：GitHub 仓库的 `Releases`
 
 ## 常见问题（最小版）
