@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -40,12 +41,30 @@ func main() {
 
 	scanner := bufio.NewScanner(os.Stdin)
 	fmt.Println("enter text and press Enter (Ctrl+D to quit)")
+	fmt.Println("tip: prefix with json: to send a full event payload (attachments/media fields)")
 	for scanner.Scan() {
 		line := scanner.Text()
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
-		eventPayload, err := protocol.EncodeEvent(protocol.Event{Type: protocol.EventUserMessage, Content: line})
+
+		outboundEvent := protocol.Event{Type: protocol.EventUserMessage, Content: line}
+		if strings.HasPrefix(strings.TrimSpace(line), "json:") {
+			raw := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "json:"))
+			if raw == "" {
+				fmt.Println("error: empty json payload after json:")
+				continue
+			}
+			if err := json.Unmarshal([]byte(raw), &outboundEvent); err != nil {
+				fmt.Printf("error: invalid json event: %v\n", err)
+				continue
+			}
+			if outboundEvent.Type == "" {
+				outboundEvent.Type = protocol.EventUserMessage
+			}
+		}
+
+		eventPayload, err := protocol.EncodeEvent(outboundEvent)
 		if err != nil {
 			log.Printf("encode event error=%v", err)
 			continue
@@ -93,6 +112,23 @@ func main() {
 				switch ev.Type {
 				case protocol.EventToken:
 					fmt.Print(ev.Content)
+				case protocol.EventMedia:
+					fmt.Println()
+					for _, m := range ev.Media {
+						kind := m.Type
+						if kind == "" {
+							kind = "file"
+						}
+						if m.URL != "" {
+							fmt.Printf("[media] %s %s\n", kind, m.URL)
+							continue
+						}
+						if m.FileName != "" {
+							fmt.Printf("[media] %s %s\n", kind, m.FileName)
+							continue
+						}
+						fmt.Printf("[media] %s\n", kind)
+					}
 				case protocol.EventEnd:
 					fmt.Println()
 					goto nextInput

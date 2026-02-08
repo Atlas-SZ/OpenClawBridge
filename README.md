@@ -114,6 +114,7 @@ go run ./cli -relay-url wss://YOUR_RELAY_DOMAIN/client -access-code A-123456 -re
 ```
 
 看到 `connected session=...` 后输入文本，能收到 `token/end` 即链路成功。
+CLI 也支持 `json:` 前缀发送完整事件（可用于附件/媒体字段测试）。
 可选参数：
 - `-reconnect=true|false`（默认 `true`，断线自动重连）
 - `-reconnect-delay 2s`（重连间隔）

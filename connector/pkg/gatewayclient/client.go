@@ -120,11 +120,11 @@ func (c *Client) Run(ctx context.Context) error {
 	}
 }
 
-func (c *Client) SendUserMessage(sessionID, content string) error {
+func (c *Client) SendUserMessage(sessionID string, event protocol.Event) error {
 	reqID := newID("gw_req_")
 	c.trackRequest(reqID, sessionID)
 
-	params, err := c.buildSendParams(sessionID, reqID, content)
+	params, err := c.buildSendParams(sessionID, reqID, event)
 	if err != nil {
 		c.untrackRequest(reqID)
 		return err
@@ -144,33 +144,86 @@ func (c *Client) SendUserMessage(sessionID, content string) error {
 	return nil
 }
 
-func (c *Client) buildSendParams(sessionID, reqID, content string) (map[string]any, error) {
+func (c *Client) buildSendParams(sessionID, reqID string, event protocol.Event) (map[string]any, error) {
+	content := strings.TrimSpace(event.Content)
+	attachments := normalizeAttachments(event.Attachments)
+
 	if isAgentMethod(c.cfg.SendMethod) {
-		return map[string]any{
+		if content == "" {
+			return nil, errors.New("content is required for agent method")
+		}
+		params := map[string]any{
 			"sessionKey":     gatewaySessionKey(sessionID),
 			"message":        content,
 			"idempotencyKey": reqID,
-		}, nil
+		}
+		if len(attachments) > 0 {
+			params["attachments"] = attachments
+		}
+		return params, nil
 	}
 
 	if isChatSendMethod(c.cfg.SendMethod) {
-		return map[string]any{
+		if content == "" && len(attachments) == 0 {
+			return nil, errors.New("content or attachments is required for chat.send method")
+		}
+		params := map[string]any{
 			"sessionKey":     gatewaySessionKey(sessionID),
 			"message":        content,
 			"idempotencyKey": reqID,
-		}, nil
+		}
+		if len(attachments) > 0 {
+			params["attachments"] = attachments
+		}
+		return params, nil
 	}
 
 	if requiresAddressedMessage(c.cfg.SendMethod) {
-		to := strings.TrimSpace(c.cfg.SendTo)
+		to := strings.TrimSpace(event.To)
+		if to == "" {
+			to = strings.TrimSpace(c.cfg.SendTo)
+		}
 		if to == "" {
 			to = "remote"
 		}
-		return map[string]any{
+		if content == "" {
+			return nil, errors.New("content is required for send method")
+		}
+
+		params := map[string]any{
 			"to":             to,
 			"message":        content,
 			"idempotencyKey": reqID,
-		}, nil
+		}
+
+		mediaURLs := dedupeNonEmptyStrings(event.MediaURLs...)
+		attachmentURLs := mediaURLsFromAttachments(event.Attachments)
+		if len(attachmentURLs) > 0 {
+			mediaURLs = dedupeNonEmptyStrings(append(mediaURLs, attachmentURLs...)...)
+		}
+		if mediaURL := strings.TrimSpace(event.MediaURL); mediaURL != "" {
+			params["mediaUrl"] = mediaURL
+		}
+		if len(mediaURLs) > 0 {
+			params["mediaUrls"] = mediaURLs
+		}
+		if channel := strings.TrimSpace(event.Channel); channel != "" {
+			params["channel"] = channel
+		}
+		if accountID := strings.TrimSpace(event.AccountID); accountID != "" {
+			params["accountId"] = accountID
+		}
+		if sessionKey := strings.TrimSpace(event.SessionKey); sessionKey != "" {
+			params["sessionKey"] = sessionKey
+		}
+		if event.GifPlayback {
+			params["gifPlayback"] = true
+		}
+		return params, nil
+	}
+
+	if content == "" {
+		return nil, errors.New("content is required")
 	}
 
 	return map[string]any{
@@ -450,6 +503,7 @@ func (c *Client) handleResponse(env envelope) error {
 			if content := extractChatText(payload); content != "" {
 				c.emitEvent(sessionID, protocol.Event{Type: protocol.EventToken, Content: content})
 			}
+			c.emitMediaFromPayload(sessionID, payload)
 
 			if isErrorStatus(status) {
 				msg := extractErrorMessageFromPayload(payload)
@@ -528,6 +582,7 @@ func (c *Client) handleEvent(env envelope) {
 		}
 		c.emitEvent(sessionID, protocol.Event{Type: protocol.EventToken, Content: content})
 	case isDoneEventName(eventName):
+		c.emitMediaFromPayload(sessionID, payload)
 		c.emitEvent(sessionID, protocol.Event{Type: protocol.EventEnd})
 		if corrID != "" {
 			c.untrackRequest(corrID)
@@ -555,6 +610,7 @@ func (c *Client) handleChatEvent(sessionID, runID string, payload map[string]any
 		if text != "" {
 			c.emitChatToken(sessionID, runID, text)
 		}
+		c.emitMediaFromPayload(sessionID, payload)
 		c.emitEvent(sessionID, protocol.Event{Type: protocol.EventEnd})
 		if runID != "" {
 			c.clearRun(runID)
@@ -574,6 +630,7 @@ func (c *Client) handleChatEvent(sessionID, runID string, payload map[string]any
 			c.emitChatToken(sessionID, runID, text)
 			// Some gateway versions return single-shot chat events with no state/run id.
 			if runID == "" && state == "" {
+				c.emitMediaFromPayload(sessionID, payload)
 				c.emitEvent(sessionID, protocol.Event{Type: protocol.EventEnd})
 			}
 		}
@@ -597,6 +654,7 @@ func (c *Client) handleAgentEvent(sessionID, runID string, payload map[string]an
 	}
 	switch terminal {
 	case "final", "done", "completed", "end", "ended", "finish", "finished":
+		c.emitMediaFromPayload(sessionID, payload)
 		c.emitEvent(sessionID, protocol.Event{Type: protocol.EventEnd})
 		if runID != "" {
 			c.clearRun(runID)
@@ -640,6 +698,14 @@ func (c *Client) emitEvent(sessionID string, event protocol.Event) {
 		return
 	}
 	c.handlers.OnEvent(sessionID, event)
+}
+
+func (c *Client) emitMediaFromPayload(sessionID string, payload map[string]any) {
+	media := extractMediaItems(payload)
+	if len(media) == 0 {
+		return
+	}
+	c.emitEvent(sessionID, protocol.Event{Type: protocol.EventMedia, Media: media})
 }
 
 func (c *Client) writeJSON(v any) error {
@@ -860,6 +926,57 @@ func equalScopes(a, b []string) bool {
 	return true
 }
 
+func normalizeAttachments(items []protocol.MediaItem) []map[string]any {
+	out := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		content := strings.TrimSpace(item.Content)
+		if content == "" {
+			continue
+		}
+		att := map[string]any{
+			"content": content,
+		}
+		if typ := strings.TrimSpace(item.Type); typ != "" {
+			att["type"] = typ
+		}
+		if mime := strings.TrimSpace(item.MimeType); mime != "" {
+			att["mimeType"] = mime
+		}
+		if fileName := strings.TrimSpace(item.FileName); fileName != "" {
+			att["fileName"] = fileName
+		}
+		out = append(out, att)
+	}
+	return out
+}
+
+func mediaURLsFromAttachments(items []protocol.MediaItem) []string {
+	urls := make([]string, 0, len(items))
+	for _, item := range items {
+		if u := strings.TrimSpace(item.URL); u != "" {
+			urls = append(urls, u)
+		}
+	}
+	return dedupeNonEmptyStrings(urls...)
+}
+
+func dedupeNonEmptyStrings(values ...string) []string {
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, v := range values {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			continue
+		}
+		if _, ok := seen[v]; ok {
+			continue
+		}
+		seen[v] = struct{}{}
+		out = append(out, v)
+	}
+	return out
+}
+
 func isConnectSchemaError(err error) bool {
 	if err == nil {
 		return false
@@ -1003,6 +1120,115 @@ func extractAgentText(payload map[string]any) string {
 		return content
 	}
 	return ""
+}
+
+func extractMediaItems(payload map[string]any) []protocol.MediaItem {
+	out := make([]protocol.MediaItem, 0, 2)
+	seen := map[string]struct{}{}
+	collectMediaFromAny(payload, "", &out, seen, 0)
+	return out
+}
+
+func collectMediaFromAny(v any, hintedType string, out *[]protocol.MediaItem, seen map[string]struct{}, depth int) {
+	if depth > 6 || v == nil {
+		return
+	}
+
+	switch t := v.(type) {
+	case map[string]any:
+		typ := normalizeMediaType(stringValue(t["type"]))
+		if typ == "" {
+			typ = hintedType
+		}
+		mime := strings.TrimSpace(stringValue(t["mimeType"]))
+		if mime == "" {
+			mime = strings.TrimSpace(stringValue(t["mime_type"]))
+		}
+		fileName := strings.TrimSpace(stringValue(t["fileName"]))
+		if fileName == "" {
+			fileName = strings.TrimSpace(stringValue(t["name"]))
+		}
+
+		for _, key := range []string{"url", "uri", "src", "imageUrl", "fileUrl", "mediaUrl"} {
+			if u := strings.TrimSpace(stringValue(t[key])); u != "" {
+				addMediaItem(out, seen, protocol.MediaItem{
+					Type:     typ,
+					URL:      u,
+					MimeType: mime,
+					FileName: fileName,
+				})
+			}
+		}
+		for _, key := range []string{"mediaUrls", "urls"} {
+			if arr, ok := t[key].([]any); ok {
+				for _, item := range arr {
+					if u := strings.TrimSpace(stringValue(item)); u != "" {
+						addMediaItem(out, seen, protocol.MediaItem{
+							Type:     typ,
+							URL:      u,
+							MimeType: mime,
+							FileName: fileName,
+						})
+					}
+				}
+			}
+		}
+
+		if content := strings.TrimSpace(stringValue(t["content"])); content != "" && typ != "" {
+			addMediaItem(out, seen, protocol.MediaItem{
+				Type:     typ,
+				Content:  content,
+				MimeType: mime,
+				FileName: fileName,
+			})
+		}
+		if data := strings.TrimSpace(stringValue(t["data"])); data != "" && typ != "" {
+			addMediaItem(out, seen, protocol.MediaItem{
+				Type:     typ,
+				Content:  data,
+				MimeType: mime,
+				FileName: fileName,
+			})
+		}
+
+		for _, key := range []string{"message", "content", "attachments", "media", "source", "data", "output", "result", "response", "payload"} {
+			if nested, ok := t[key]; ok {
+				collectMediaFromAny(nested, typ, out, seen, depth+1)
+			}
+		}
+	case []any:
+		for _, item := range t {
+			collectMediaFromAny(item, hintedType, out, seen, depth+1)
+		}
+	}
+}
+
+func addMediaItem(out *[]protocol.MediaItem, seen map[string]struct{}, item protocol.MediaItem) {
+	if strings.TrimSpace(item.URL) == "" && strings.TrimSpace(item.Content) == "" {
+		return
+	}
+	key := strings.ToLower(strings.TrimSpace(item.Type)) + "|" + strings.TrimSpace(item.URL) + "|" + strings.TrimSpace(item.Content)
+	if _, ok := seen[key]; ok {
+		return
+	}
+	seen[key] = struct{}{}
+	*out = append(*out, item)
+}
+
+func normalizeMediaType(v string) string {
+	v = strings.ToLower(strings.TrimSpace(v))
+	switch {
+	case strings.Contains(v, "image"):
+		return "image"
+	case strings.Contains(v, "audio"):
+		return "audio"
+	case strings.Contains(v, "video"):
+		return "video"
+	case strings.Contains(v, "file"), strings.Contains(v, "document"), strings.Contains(v, "attachment"):
+		return "file"
+	default:
+		return ""
+	}
 }
 
 func messageContentText(v any) string {

@@ -6,6 +6,6 @@
 4. Relay only parses control messages: REGISTER, CONNECT, CONNECT_OK, SESSION_OPEN, CLOSE_SESSION, HEARTBEAT, ERROR.
 5. Relay treats DATA payload as opaque bytes (plaintext/ciphertext both supported transparently).
 6. Connector v0.1 does not implement busy/write_lock/concurrency interception.
-7. v0.1 focuses on text chat event flow (`user_message/token/end/error`), no attachments.
+7. Connector supports rich payload pass-through at event level (for example `attachments`, `mediaUrl`, `mediaUrls`), while Relay still treats DATA payload as opaque bytes.
 8. No account system in v0.1. Access code is the only credential.
 9. OpenClaw Gateway integration is Phase 2; this phase is stub-only in local implementation.

@@ -13,7 +13,7 @@ type RelaySender interface {
 }
 
 type GatewaySender interface {
-	SendUserMessage(sessionID, content string) error
+	SendUserMessage(sessionID string, event protocol.Event) error
 	SendCancel(sessionID string) error
 	IsReady() bool
 }
@@ -89,7 +89,7 @@ func (b *GatewayBridge) HandleData(sessionID string, flags byte, payload []byte)
 
 	switch event.Type {
 	case protocol.EventUserMessage:
-		if err := gateway.SendUserMessage(sessionID, event.Content); err != nil {
+		if err := gateway.SendUserMessage(sessionID, event); err != nil {
 			b.sendEvent(sessionID, flags, protocol.Event{Type: protocol.EventError, Code: "GATEWAY_SEND_FAILED", Message: err.Error()})
 		}
 	case "control":

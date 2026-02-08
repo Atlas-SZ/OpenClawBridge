@@ -63,11 +63,30 @@ Relay behavior:
 - Forward original binary frame unchanged.
 
 ## Unified Event Protocol (inside DATA payload)
-v0.1 uses JSON event payload for text chat.
+Uses JSON event payload. Relay never parses this JSON.
 
 ### user_message (Client -> Connector)
 ```json
 {"type":"user_message","content":"hello"}
+```
+
+Rich media fields (optional on `user_message`):
+
+```json
+{
+  "type":"user_message",
+  "content":"describe this image",
+  "attachments":[
+    {"type":"image","mimeType":"image/png","fileName":"pic.png","content":"<base64>"}
+  ],
+  "to":"+15551234567",
+  "channel":"whatsapp",
+  "accountId":"acc_main",
+  "sessionKey":"bridge_s_xxx",
+  "mediaUrl":"https://example.com/a.png",
+  "mediaUrls":["https://example.com/a.png","https://example.com/b.jpg"],
+  "gifPlayback":true
+}
 ```
 
 ### control.stop (Client -> Connector)
@@ -90,6 +109,11 @@ v0.1 uses JSON event payload for text chat.
 {"type":"error","code":"...","message":"..."}
 ```
 
+### media (Connector -> Client)
+```json
+{"type":"media","media":[{"type":"image","url":"https://...","mimeType":"image/png","fileName":"a.png"}]}
+```
+
 ## Connector <-> Gateway Mapping (Phase 2)
 - Connector waits for `connect.challenge`, then sends `connect` as `role=operator`.
 - Connector prefers scopes including `operator.admin`; if rejected, connector retries without `operator.admin`.
@@ -98,18 +122,22 @@ v0.1 uses JSON event payload for text chat.
     - `sessionKey` generated from bridge `session_id`
     - `message` from event `content`
     - `idempotencyKey` generated per request
+    - `attachments` from event `attachments` (base64 content)
   - If method is `chat.send`/`*.chat.send`, params are:
     - `sessionKey` generated from bridge `session_id`
     - `message` from event `content`
     - `idempotencyKey` generated per request
+    - `attachments` from event `attachments` (base64 content)
   - If method is `send`/`*.send`, params are:
-    - `to` from `gateway.send_to` (default `remote`)
+    - `to` from event `to`, fallback `gateway.send_to` (default `remote`)
     - `message` from event `content`
     - `idempotencyKey` generated per request
+    - optional `mediaUrl`/`mediaUrls`/`channel`/`accountId`/`sessionKey`/`gifPlayback`
 - `control.stop` -> Gateway request (`gateway.cancel_method`, default `chat.abort`).
 - Gateway `token/chunk` events -> `token`.
 - Gateway `completed/done` events -> `end`.
 - Gateway `error/disconnect` events -> `error`.
+- Gateway events with media payloads (url/base64 blocks) -> `media`.
 - Connector also maps `agent` stream events (`assistant/lifecycle`) to `token/end/error` for compatibility.
 
 ## Session Rules
