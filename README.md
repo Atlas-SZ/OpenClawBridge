@@ -106,6 +106,17 @@ go run ./relay -addr :8080
 - `/tunnel` -> Relay `/tunnel`
 - `/client` -> Relay `/client`
 
+#### 作为 systemd service 长期运行（推荐）
+
+仓库模板：`deploy/systemd/openclaw-bridge-relay.service`
+
+```bash
+cp deploy/systemd/openclaw-bridge-relay.service /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now openclaw-bridge-relay
+systemctl status openclaw-bridge-relay
+```
+
 ### C. 用户侧（客户端设备）
 
 当前客户端为 CLI（验收工具）：
@@ -115,6 +126,19 @@ go run ./cli -relay-url wss://YOUR_DOMAIN/client -access-code YOUR_ACCESS_CODE
 ```
 
 要求：`-access-code` 必须与 Connector 配置中的 `access_code` 一致。
+
+### OpenClaw 侧 Connector 作为 systemd service 长期运行（推荐）
+
+仓库模板：`deploy/systemd/openclaw-bridge-connector.service`
+
+```bash
+cp deploy/systemd/openclaw-bridge-connector.service /etc/systemd/system/
+mkdir -p /etc/openclaw-bridge
+# 准备 /etc/openclaw-bridge/connector.json 后再启动
+systemctl daemon-reload
+systemctl enable --now openclaw-bridge-connector
+systemctl status openclaw-bridge-connector
+```
 
 ## Connector Config Example
 
