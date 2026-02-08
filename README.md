@@ -25,6 +25,23 @@ OpenClawBridge 是一个 WebSocket 桥接系统，用于在**不暴露 OpenClaw 
 
 以下步骤按角色分三段，适合你的生产架构（不是单机演示）。
 
+### 0) 一键部署（推荐）
+
+在对应机器执行（root 或 sudo）：
+
+```bash
+# 中继服务器
+sudo ./deploy/install.sh --role relay
+
+# OpenClaw 服务器（连接器）
+sudo ./deploy/install.sh --role connector
+```
+
+可选参数：
+
+- `--config /etc/openclaw-bridge/connector.json`：指定 connector 配置路径
+- `--role both`：同机安装 relay + connector（仅测试场景）
+
 ### 1) 准备代码（两台服务器都执行）
 
 ```bash
