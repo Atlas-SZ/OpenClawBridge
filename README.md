@@ -94,7 +94,6 @@ cp connector/config.example.json /etc/openclaw-bridge/connector.json
 - `gateway.url`：本地 Gateway 地址
 - `gateway.auth.token`：OpenClaw operator token
 - `gateway.min_protocol` / `gateway.max_protocol`：Gateway 协议版本（默认 `3/3`）
-- `gateway.scopes`：默认 `["operator.read","operator.write"]`
 
 启动 Connector：
 

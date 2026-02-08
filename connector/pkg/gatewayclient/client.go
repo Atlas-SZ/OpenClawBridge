@@ -258,18 +258,11 @@ func (c *Client) performConnect(conn *websocket.Conn) error {
 				"token": c.cfg.Auth.Token,
 			},
 			"client": map[string]any{
-				"id":       c.cfg.Client.ID,
-				"version":  c.cfg.Client.Version,
-				"platform": c.cfg.Client.Platform,
-				"mode":     c.cfg.Client.Mode,
+				"id":          c.cfg.Client.ID,
+				"displayName": c.cfg.Client.DisplayName,
+				"role":        "operator",
 			},
-			"role":        "operator",
-			"scopes":      c.cfg.Scopes,
-			"caps":        []any{},
-			"commands":    []any{},
-			"permissions": map[string]any{},
-			"locale":      c.cfg.Locale,
-			"userAgent":   c.cfg.UserAgent,
+			"caps": map[string]any{},
 		},
 	}
 
