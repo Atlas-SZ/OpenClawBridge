@@ -467,6 +467,10 @@ func (c *Client) handleEvent(env envelope) {
 		c.handleChatEvent(sessionID, corrID, payload)
 		return
 	}
+	if isAgentEventName(eventName) {
+		c.handleAgentEvent(sessionID, corrID, payload)
+		return
+	}
 
 	switch {
 	case isTokenEventName(eventName):
@@ -524,6 +528,39 @@ func (c *Client) handleChatEvent(sessionID, runID string, payload map[string]any
 			if runID == "" && state == "" {
 				c.emitEvent(sessionID, protocol.Event{Type: protocol.EventEnd})
 			}
+		}
+	}
+}
+
+func (c *Client) handleAgentEvent(sessionID, runID string, payload map[string]any) {
+	stream := strings.ToLower(stringValue(payload["stream"]))
+	state := strings.ToLower(stringValue(payload["state"]))
+	typ := strings.ToLower(stringValue(payload["type"]))
+
+	if stream == "assistant" || stream == "" {
+		if text := extractAgentText(payload); text != "" {
+			c.emitChatToken(sessionID, runID, text)
+		}
+	}
+
+	terminal := state
+	if terminal == "" {
+		terminal = typ
+	}
+	switch terminal {
+	case "final", "done", "completed", "end", "ended", "finish", "finished":
+		c.emitEvent(sessionID, protocol.Event{Type: protocol.EventEnd})
+		if runID != "" {
+			c.clearRun(runID)
+		}
+	case "error", "failed":
+		c.emitEvent(sessionID, protocol.Event{
+			Type:    protocol.EventError,
+			Code:    "GATEWAY_EVENT_ERROR",
+			Message: extractErrorMessageFromPayload(payload),
+		})
+		if runID != "" {
+			c.clearRun(runID)
 		}
 	}
 }
@@ -882,6 +919,20 @@ func extractChatText(payload map[string]any) string {
 	return extractContent(payload)
 }
 
+func extractAgentText(payload map[string]any) string {
+	for _, key := range []string{"delta", "text", "content", "message"} {
+		if msgObj, ok := payload[key].(map[string]any); ok {
+			if content := extractChatText(msgObj); content != "" {
+				return content
+			}
+		}
+	}
+	if content := extractChatText(payload); content != "" {
+		return content
+	}
+	return ""
+}
+
 func messageContentText(v any) string {
 	switch t := v.(type) {
 	case string:
@@ -956,6 +1007,10 @@ func isDisconnectEventName(name string) bool {
 
 func isChatEventName(name string) bool {
 	return strings.Contains(name, "chat")
+}
+
+func isAgentEventName(name string) bool {
+	return strings.Contains(name, "agent")
 }
 
 func stringValue(v any) string {

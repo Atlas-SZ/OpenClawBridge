@@ -106,6 +106,7 @@ v0.1 uses JSON event payload for text chat.
 - Gateway `token/chunk` events -> `token`.
 - Gateway `completed/done` events -> `end`.
 - Gateway `error/disconnect` events -> `error`.
+- Connector also maps `agent` stream events (`assistant/lifecycle`) to `token/end/error` for compatibility.
 
 ## Session Rules
 - Client sends CONNECT with access code.
