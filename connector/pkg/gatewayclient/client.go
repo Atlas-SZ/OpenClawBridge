@@ -151,7 +151,7 @@ func (c *Client) buildSendParams(sessionID, reqID string, event protocol.Event) 
 	if isAgentMethod(c.cfg.SendMethod) {
 		if content == "" {
 			if len(attachments) > 0 {
-				content = "Please analyze the attachment."
+				content = "The image attachment is already included in this request. Analyze it directly and do not ask for file path or URL."
 			} else {
 				return nil, errors.New("content is required for agent method")
 			}
