@@ -95,6 +95,8 @@ mkdir -p /etc/openclaw-bridge
       "mode": "cli"
     },
     "scopes": ["operator.read", "operator.write"],
+    "max_attachment_bytes": 1048576,
+    "max_total_attachment_bytes": 2097152,
     "send_method": "agent",
     "cancel_method": "chat.abort"
   }
@@ -140,6 +142,14 @@ python3 -m http.server 8787
 - 文本 `user_message`
 - 附件（浏览器内转 base64，走 `attachments` 字段）
 - Raw JSON 事件发送（便于调试富媒体字段）
+
+默认附件安全限制：
+
+- 单文件 `<= 1MB`
+- 单次事件附件总量 `<= 2MB`
+
+超过限制时会在前端/Connector 直接报错，避免 Gateway 返回 `1009 (message too big)`。
+大文件请改用 `mediaUrl` / `mediaUrls`。
 
 ## Release 包内容
 
@@ -198,6 +208,7 @@ systemctl enable --now openclaw-bridge-connector
 - `Gateway auth failed`：`gateway.auth.token` 与 Gateway 配置不一致。
 - `missing scope: operator.admin`：Connector 会自动尝试补 admin scope；若仍失败，说明 token 本身无该权限。
 - `unknown method ...`：`send_method` 拼写错误，推荐保持 `agent`。
+- `websocket: close 1009 (message too big)`：请求包过大（常见于 base64 附件）；降低附件大小，或使用 `mediaUrl/mediaUrls` 传 URL。
 - 发送后长时间无返回：用 `-response-timeout` 防止 CLI 无限制等待，并查看 Connector/Gateway 日志。
 
 macOS 提示“二进制已损坏/不安全，无法打开”时：
