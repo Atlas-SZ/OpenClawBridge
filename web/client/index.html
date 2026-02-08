@@ -258,8 +258,7 @@
               <input id="fileInput" type="file" multiple />
             </label>
             <p class="hint">
-              Attachment safety limit: <= 1 MB per file, <= 2 MB total. For larger media, send URL via
-              <span class="mono">mediaUrl/mediaUrls</span>.
+              Attachment size is not limited by this web client. Effective limits are defined by Nginx/Gateway.
             </p>
 
             <div class="buttons">
@@ -289,9 +288,6 @@
     <script>
       const encoder = new TextEncoder();
       const decoder = new TextDecoder();
-      const MAX_ATTACHMENT_BYTES = 1 * 1024 * 1024;
-      const MAX_TOTAL_ATTACHMENT_BYTES = 2 * 1024 * 1024;
-      const MAX_EVENT_PAYLOAD_BYTES = 3 * 1024 * 1024;
 
       const relayUrlEl = document.getElementById("relayUrl");
       const accessCodeEl = document.getElementById("accessCode");
@@ -553,69 +549,9 @@
         return "file";
       }
 
-      function formatBytes(n) {
-        if (n < 1024) return `${n} B`;
-        if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-        return `${(n / (1024 * 1024)).toFixed(2)} MB`;
-      }
-
-      function sanitizeBase64Content(raw) {
-        const text = String(raw || "").trim();
-        const comma = text.indexOf(",");
-        if (comma > 0 && text.slice(0, comma).toLowerCase().includes("base64")) {
-          return text
-            .slice(comma + 1)
-            .replace(/[\r\n\t ]+/g, "");
-        }
-        return text.replace(/[\r\n\t ]+/g, "");
-      }
-
-      function estimateBase64DecodedBytes(raw) {
-        const b64 = sanitizeBase64Content(raw);
-        if (!b64) return 0;
-        let padding = 0;
-        if (b64.endsWith("==")) padding = 2;
-        else if (b64.endsWith("=")) padding = 1;
-        return Math.floor((b64.length * 3) / 4) - padding;
-      }
-
-      function validateEventAttachmentLimits(eventObj) {
-        const list = Array.isArray(eventObj.attachments) ? eventObj.attachments : [];
-        let total = 0;
-        for (let i = 0; i < list.length; i += 1) {
-          const item = list[i] || {};
-          if (!item.content) continue;
-          const size = estimateBase64DecodedBytes(item.content);
-          if (size > MAX_ATTACHMENT_BYTES) {
-            const name = item.fileName || `attachment #${i + 1}`;
-            throw new Error(
-              `${name} too large (${formatBytes(size)} > ${formatBytes(MAX_ATTACHMENT_BYTES)}). Use mediaUrl/mediaUrls for large media.`
-            );
-          }
-          total += size;
-          if (total > MAX_TOTAL_ATTACHMENT_BYTES) {
-            throw new Error(
-              `attachments total too large (${formatBytes(total)} > ${formatBytes(MAX_TOTAL_ATTACHMENT_BYTES)}). Use mediaUrl/mediaUrls for large media.`
-            );
-          }
-        }
-      }
-
       async function buildAttachments(files) {
         const out = [];
-        let total = 0;
         for (const f of files) {
-          if (f.size > MAX_ATTACHMENT_BYTES) {
-            throw new Error(
-              `"${f.name}" too large (${formatBytes(f.size)} > ${formatBytes(MAX_ATTACHMENT_BYTES)}). Use mediaUrl/mediaUrls for large media.`
-            );
-          }
-          total += f.size;
-          if (total > MAX_TOTAL_ATTACHMENT_BYTES) {
-            throw new Error(
-              `attachments total too large (${formatBytes(total)} > ${formatBytes(MAX_TOTAL_ATTACHMENT_BYTES)}). Use mediaUrl/mediaUrls for large media.`
-            );
-          }
           const content = await readFileAsBase64(f);
           out.push({
             type: mediaTypeFromMime(f.type || ""),
@@ -638,13 +574,7 @@
 
       async function sendEvent(eventObj) {
         ensureReadyToSend();
-        validateEventAttachmentLimits(eventObj);
         const payload = encoder.encode(JSON.stringify(eventObj));
-        if (payload.length > MAX_EVENT_PAYLOAD_BYTES) {
-          throw new Error(
-            `event payload too large (${formatBytes(payload.length)} > ${formatBytes(MAX_EVENT_PAYLOAD_BYTES)}).`
-          );
-        }
         const frame = buildDataFrame(sessionId, 0, payload);
         ws.send(frame);
       }

@@ -27,8 +27,6 @@ type GatewayConfig struct {
 	Scopes                  []string            `json:"scopes"`
 	Locale                  string              `json:"locale"`
 	UserAgent               string              `json:"user_agent"`
-	MaxAttachmentBytes      int64               `json:"max_attachment_bytes"`
-	MaxTotalAttachmentBytes int64               `json:"max_total_attachment_bytes"`
 	ChallengeTimeoutSeconds int                 `json:"challenge_timeout_seconds"`
 	ReconnectInitialSeconds int                 `json:"reconnect_initial_seconds"`
 	ReconnectMaxSeconds     int                 `json:"reconnect_max_seconds"`
@@ -107,15 +105,6 @@ func Load(path string) (Config, error) {
 	}
 	if cfg.Gateway.UserAgent == "" {
 		cfg.Gateway.UserAgent = "openclaw-bridge-connector/0.1.0"
-	}
-	if cfg.Gateway.MaxAttachmentBytes <= 0 {
-		cfg.Gateway.MaxAttachmentBytes = 1 * 1024 * 1024
-	}
-	if cfg.Gateway.MaxTotalAttachmentBytes <= 0 {
-		cfg.Gateway.MaxTotalAttachmentBytes = 2 * 1024 * 1024
-	}
-	if cfg.Gateway.MaxTotalAttachmentBytes < cfg.Gateway.MaxAttachmentBytes {
-		cfg.Gateway.MaxTotalAttachmentBytes = cfg.Gateway.MaxAttachmentBytes
 	}
 	if cfg.Gateway.ChallengeTimeoutSeconds <= 0 {
 		cfg.Gateway.ChallengeTimeoutSeconds = 8

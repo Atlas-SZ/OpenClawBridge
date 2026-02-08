@@ -145,10 +145,6 @@ func (c *Client) SendUserMessage(sessionID string, event protocol.Event) error {
 }
 
 func (c *Client) buildSendParams(sessionID, reqID string, event protocol.Event) (map[string]any, error) {
-	if err := validateAttachmentSizeLimits(event.Attachments, c.cfg.MaxAttachmentBytes, c.cfg.MaxTotalAttachmentBytes); err != nil {
-		return nil, err
-	}
-
 	content := strings.TrimSpace(event.Content)
 	attachments := normalizeAttachments(event.Attachments)
 
@@ -952,69 +948,6 @@ func normalizeAttachments(items []protocol.MediaItem) []map[string]any {
 		out = append(out, att)
 	}
 	return out
-}
-
-func validateAttachmentSizeLimits(items []protocol.MediaItem, maxPerAttachment, maxTotal int64) error {
-	if maxPerAttachment <= 0 && maxTotal <= 0 {
-		return nil
-	}
-
-	var total int64
-	for i, item := range items {
-		content := sanitizeBase64Content(item.Content)
-		if content == "" {
-			continue
-		}
-
-		size := estimateBase64DecodedSize(content)
-		name := attachmentLabel(i, item)
-
-		if maxPerAttachment > 0 && size > maxPerAttachment {
-			return fmt.Errorf("%s is too large (%d bytes > max_attachment_bytes=%d). use mediaUrl/mediaUrls for large media", name, size, maxPerAttachment)
-		}
-		total += size
-		if maxTotal > 0 && total > maxTotal {
-			return fmt.Errorf("attachments total too large (%d bytes > max_total_attachment_bytes=%d). use mediaUrl/mediaUrls for large media", total, maxTotal)
-		}
-	}
-	return nil
-}
-
-func attachmentLabel(index int, item protocol.MediaItem) string {
-	if name := strings.TrimSpace(item.FileName); name != "" {
-		return fmt.Sprintf("attachment %q", name)
-	}
-	return fmt.Sprintf("attachment #%d", index+1)
-}
-
-func sanitizeBase64Content(raw string) string {
-	s := strings.TrimSpace(raw)
-	if i := strings.IndexByte(s, ','); i > 0 && strings.Contains(strings.ToLower(s[:i]), "base64") {
-		s = s[i+1:]
-	}
-	return strings.Map(func(r rune) rune {
-		switch r {
-		case ' ', '\n', '\r', '\t':
-			return -1
-		default:
-			return r
-		}
-	}, s)
-}
-
-func estimateBase64DecodedSize(content string) int64 {
-	n := len(content)
-	if n == 0 {
-		return 0
-	}
-	padding := 0
-	if content[n-1] == '=' {
-		padding++
-	}
-	if n > 1 && content[n-2] == '=' {
-		padding++
-	}
-	return int64((n*3)/4 - padding)
 }
 
 func mediaURLsFromAttachments(items []protocol.MediaItem) []string {

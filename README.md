@@ -95,8 +95,6 @@ mkdir -p /etc/openclaw-bridge
       "mode": "cli"
     },
     "scopes": ["operator.read", "operator.write"],
-    "max_attachment_bytes": 1048576,
-    "max_total_attachment_bytes": 2097152,
     "send_method": "agent",
     "cancel_method": "chat.abort"
   }
@@ -142,14 +140,6 @@ python3 -m http.server 8787
 - 文本 `user_message`
 - 附件（浏览器内转 base64，走 `attachments` 字段）
 - Raw JSON 事件发送（便于调试富媒体字段）
-
-默认附件安全限制：
-
-- 单文件 `<= 1MB`
-- 单次事件附件总量 `<= 2MB`
-
-超过限制时会在前端/Connector 直接报错，避免 Gateway 返回 `1009 (message too big)`。
-大文件请改用 `mediaUrl` / `mediaUrls`。
 
 ## Release 包内容
 
@@ -203,12 +193,51 @@ systemctl enable --now openclaw-bridge-relay
 systemctl enable --now openclaw-bridge-connector
 ```
 
+## 线上编译更新与检查
+
+以下命令用于服务器上“拉代码 -> 编译 -> 重启生效 -> 检查状态”。
+
+### Relay（中继服务）
+
+```bash
+cd /opt/code/OpenClawBridge
+git pull
+go build -o /usr/local/bin/openclaw-relay ./relay
+systemctl restart openclaw-bridge-relay
+```
+
+### Connector（OpenClaw 侧桥接器）
+
+```bash
+cd /opt/code/OpenClawBridge
+git pull
+go build -o /usr/local/bin/openclaw-connector ./connector
+systemctl restart openclaw-bridge-connector
+```
+
+### 检查指令（状态 / 日志 / 健康）
+
+```bash
+systemctl status openclaw-bridge-relay --no-pager
+systemctl status openclaw-bridge-connector --no-pager
+journalctl -u openclaw-bridge-relay -n 80 --no-pager
+journalctl -u openclaw-bridge-connector -n 80 --no-pager
+curl -v http://127.0.0.1:8080/healthz
+```
+
+如果 OpenClaw Gateway 也是 systemd user service，可额外检查：
+
+```bash
+systemctl --user status openclaw-gateway.service --no-pager
+journalctl --user -u openclaw-gateway.service -n 80 --no-pager
+```
+
 ## 常见问题（最小版）
 
 - `Gateway auth failed`：`gateway.auth.token` 与 Gateway 配置不一致。
 - `missing scope: operator.admin`：Connector 会自动尝试补 admin scope；若仍失败，说明 token 本身无该权限。
 - `unknown method ...`：`send_method` 拼写错误，推荐保持 `agent`。
-- `websocket: close 1009 (message too big)`：请求包过大（常见于 base64 附件）；降低附件大小，或使用 `mediaUrl/mediaUrls` 传 URL。
+- `websocket: close 1009 (message too big)`：请求包超过 Nginx 或 Gateway 限制；请在 Nginx/Gateway 侧调整允许的消息大小。
 - 发送后长时间无返回：用 `-response-timeout` 防止 CLI 无限制等待，并查看 Connector/Gateway 日志。
 
 macOS 提示“二进制已损坏/不安全，无法打开”时：
