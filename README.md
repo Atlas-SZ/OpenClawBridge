@@ -33,6 +33,7 @@ Client (CLI / App)
 ├── relay/         # 云端中继服务
 ├── connector/     # 用户侧桥接器
 ├── cli/           # 验收客户端
+├── deploy/        # 部署模板（Nginx）
 ├── shared/        # 共享协议定义
 └── docs/          # 协议与边界文档
 ```
@@ -110,6 +111,14 @@ go run ./cli -relay-url ws://127.0.0.1:8080/client -access-code A-123456
 
 - `/tunnel` -> `http://127.0.0.1:8080/tunnel`
 - `/client` -> `http://127.0.0.1:8080/client`
+
+仓库已提供 Nginx 模板：`deploy/nginx/openclaw-bridge.conf`
+
+最小启用步骤：
+
+1. 将模板复制到服务器：`/etc/nginx/conf.d/openclaw-bridge.conf`
+2. 替换模板中的 `DOMAIN`、`CERT_PATH`、`KEY_PATH`
+3. 校验并重载：`nginx -t && systemctl reload nginx`
 
 生产环境客户端应使用 `wss://...`。
 
