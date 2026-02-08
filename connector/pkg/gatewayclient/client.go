@@ -158,7 +158,14 @@ func (c *Client) buildSendParams(sessionID, reqID string, event protocol.Event) 
 			"idempotencyKey": reqID,
 		}
 		if len(attachments) > 0 {
-			params["attachments"] = attachments
+			fitted, changed, before, after, err := fitGatewayAttachments(c.cfg.SendMethod, reqID, params, attachments)
+			if err != nil {
+				return nil, err
+			}
+			if changed {
+				c.logger.Printf("gateway attachment auto-compressed method=%s bytes_before=%d bytes_after=%d", c.cfg.SendMethod, before, after)
+			}
+			params["attachments"] = fitted
 		}
 		return params, nil
 	}
@@ -173,7 +180,14 @@ func (c *Client) buildSendParams(sessionID, reqID string, event protocol.Event) 
 			"idempotencyKey": reqID,
 		}
 		if len(attachments) > 0 {
-			params["attachments"] = attachments
+			fitted, changed, before, after, err := fitGatewayAttachments(c.cfg.SendMethod, reqID, params, attachments)
+			if err != nil {
+				return nil, err
+			}
+			if changed {
+				c.logger.Printf("gateway attachment auto-compressed method=%s bytes_before=%d bytes_after=%d", c.cfg.SendMethod, before, after)
+			}
+			params["attachments"] = fitted
 		}
 		return params, nil
 	}
