@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -18,34 +19,19 @@ func main() {
 	relayURL := flag.String("relay-url", "ws://127.0.0.1:8080/client", "relay client websocket url")
 	accessCode := flag.String("access-code", "", "access code")
 	responseTimeout := flag.Duration("response-timeout", 45*time.Second, "max wait per prompt before timing out")
+	reconnect := flag.Bool("reconnect", true, "auto reconnect when relay connection is lost")
+	reconnectDelay := flag.Duration("reconnect-delay", 2*time.Second, "delay between reconnect attempts")
 	flag.Parse()
 
 	if strings.TrimSpace(*accessCode) == "" {
 		log.Fatal("-access-code is required")
 	}
 
-	conn, _, err := websocket.DefaultDialer.Dial(*relayURL, nil)
-	if err != nil {
-		log.Fatalf("connect relay error=%v", err)
-	}
-	defer conn.Close()
-
-	connectData, err := protocol.EncodeControl(protocol.ControlMessage{
-		Type:       protocol.TypeConnect,
-		AccessCode: *accessCode,
-		E2EE:       false,
-	})
-	if err != nil {
-		log.Fatalf("encode connect error=%v", err)
-	}
-	if err := conn.WriteMessage(websocket.TextMessage, connectData); err != nil {
-		log.Fatalf("send connect error=%v", err)
-	}
-
-	sessionID, err := waitConnectOK(conn)
+	conn, sessionID, err := connectSession(*relayURL, *accessCode)
 	if err != nil {
 		log.Fatalf("connect failed: %v", err)
 	}
+	defer conn.Close()
 	fmt.Printf("connected session=%s\n", sessionID)
 
 	events := make(chan protocol.Event, 16)
@@ -70,13 +56,36 @@ func main() {
 			continue
 		}
 		if err := conn.WriteMessage(websocket.BinaryMessage, frame); err != nil {
-			log.Fatalf("send user_message error=%v", err)
+			if !*reconnect {
+				log.Fatalf("send user_message error=%v", err)
+			}
+			fmt.Printf("connection lost, reconnecting... err=%v\n", err)
+			conn, sessionID, events, errs, err = reconnectSession(conn, *relayURL, *accessCode, *reconnectDelay)
+			if err != nil {
+				log.Fatalf("reconnect failed: %v", err)
+			}
+			frame, err = protocol.BuildDataFrame(sessionID, 0, eventPayload)
+			if err != nil {
+				log.Fatalf("build frame after reconnect error=%v", err)
+			}
+			if err := conn.WriteMessage(websocket.BinaryMessage, frame); err != nil {
+				log.Fatalf("send user_message after reconnect error=%v", err)
+			}
 		}
 
 		for {
 			select {
 			case err := <-errs:
-				log.Fatalf("read error=%v", err)
+				if !*reconnect {
+					log.Fatalf("read error=%v", err)
+				}
+				fmt.Printf("\nconnection lost, reconnecting... err=%v\n", err)
+				conn, sessionID, events, errs, err = reconnectSession(conn, *relayURL, *accessCode, *reconnectDelay)
+				if err != nil {
+					log.Fatalf("reconnect failed: %v", err)
+				}
+				fmt.Printf("request interrupted, please resend your message\n")
+				goto nextInput
 			case <-time.After(*responseTimeout):
 				fmt.Printf("\nerror: RESPONSE_TIMEOUT no terminal event within %s\n", responseTimeout.String())
 				goto nextInput
@@ -104,6 +113,52 @@ func main() {
 	_ = conn.WriteMessage(websocket.TextMessage, closeData)
 }
 
+func reconnectSession(oldConn *websocket.Conn, relayURL, accessCode string, delay time.Duration) (*websocket.Conn, string, chan protocol.Event, chan error, error) {
+	if oldConn != nil {
+		_ = oldConn.Close()
+	}
+	for {
+		conn, sessionID, err := connectSession(relayURL, accessCode)
+		if err == nil {
+			fmt.Printf("reconnected session=%s\n", sessionID)
+			events := make(chan protocol.Event, 16)
+			errs := make(chan error, 1)
+			go readLoop(conn, sessionID, events, errs)
+			return conn, sessionID, events, errs, nil
+		}
+		fmt.Printf("reconnect attempt failed: %v\n", err)
+		time.Sleep(delay)
+	}
+}
+
+func connectSession(relayURL, accessCode string) (*websocket.Conn, string, error) {
+	conn, _, err := websocket.DefaultDialer.Dial(relayURL, nil)
+	if err != nil {
+		return nil, "", fmt.Errorf("connect relay: %w", err)
+	}
+
+	connectData, err := protocol.EncodeControl(protocol.ControlMessage{
+		Type:       protocol.TypeConnect,
+		AccessCode: accessCode,
+		E2EE:       false,
+	})
+	if err != nil {
+		_ = conn.Close()
+		return nil, "", fmt.Errorf("encode connect: %w", err)
+	}
+	if err := conn.WriteMessage(websocket.TextMessage, connectData); err != nil {
+		_ = conn.Close()
+		return nil, "", fmt.Errorf("send connect: %w", err)
+	}
+
+	sessionID, err := waitConnectOK(conn)
+	if err != nil {
+		_ = conn.Close()
+		return nil, "", err
+	}
+	return conn, sessionID, nil
+}
+
 func waitConnectOK(conn *websocket.Conn) (string, error) {
 	for {
 		msgType, data, err := conn.ReadMessage()
@@ -124,7 +179,7 @@ func waitConnectOK(conn *websocket.Conn) (string, error) {
 			}
 			return msg.SessionID, nil
 		case protocol.TypeError:
-			return "", fmt.Errorf("%s: %s", msg.Code, msg.Message)
+			return "", fmt.Errorf("connect error %s: %s", msg.Code, msg.Message)
 		}
 	}
 }
@@ -133,7 +188,10 @@ func readLoop(conn *websocket.Conn, sessionID string, out chan<- protocol.Event,
 	for {
 		msgType, data, err := conn.ReadMessage()
 		if err != nil {
-			errs <- err
+			select {
+			case errs <- err:
+			default:
+			}
 			return
 		}
 		if msgType != websocket.BinaryMessage {
@@ -152,6 +210,14 @@ func readLoop(conn *websocket.Conn, sessionID string, out chan<- protocol.Event,
 		if err != nil {
 			continue
 		}
-		out <- event
+		select {
+		case out <- event:
+		default:
+			select {
+			case errs <- errors.New("event queue overflow"):
+			default:
+			}
+			return
+		}
 	}
 }

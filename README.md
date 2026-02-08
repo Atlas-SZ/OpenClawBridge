@@ -114,6 +114,19 @@ go run ./cli -relay-url wss://YOUR_RELAY_DOMAIN/client -access-code A-123456 -re
 ```
 
 看到 `connected session=...` 后输入文本，能收到 `token/end` 即链路成功。
+可选参数：
+- `-reconnect=true|false`（默认 `true`，断线自动重连）
+- `-reconnect-delay 2s`（重连间隔）
+
+## Release 包内容
+
+自动打包的 Release 压缩包内包含：
+
+- 二进制：`openclaw-relay`、`openclaw-connector`、`openclaw-cli`（Windows 为 `.exe`）
+- 中继部署文件：`deploy/nginx/openclaw-bridge.conf`
+- 服务文件：`deploy/systemd/openclaw-bridge-relay.service`、`deploy/systemd/openclaw-bridge-connector.service`
+- 一键安装脚本：`deploy/scripts/install.sh`
+- CLI 启动脚本：`deploy/cli/start-cli.sh`、`deploy/cli/start-cli.cmd`、`deploy/cli/start-cli.ps1`
 
 ## 可选：systemd 常驻运行
 

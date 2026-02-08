@@ -68,6 +68,15 @@ jobs:
           cp dist/openclaw-connector${{ matrix.ext }} "package/$pkg/"
           cp dist/openclaw-cli${{ matrix.ext }} "package/$pkg/"
           cp README.md LICENSE "package/$pkg/"
+          mkdir -p "package/$pkg/deploy/systemd" "package/$pkg/deploy/nginx" "package/$pkg/deploy/scripts" "package/$pkg/deploy/cli"
+          cp deploy/systemd/openclaw-bridge-relay.service "package/$pkg/deploy/systemd/"
+          cp deploy/systemd/openclaw-bridge-connector.service "package/$pkg/deploy/systemd/"
+          cp deploy/nginx/openclaw-bridge.conf "package/$pkg/deploy/nginx/"
+          cp deploy/install.sh "package/$pkg/deploy/scripts/"
+          cp deploy/cli/start-cli.sh "package/$pkg/deploy/cli/"
+          cp deploy/cli/start-cli.cmd "package/$pkg/deploy/cli/"
+          cp deploy/cli/start-cli.ps1 "package/$pkg/deploy/cli/"
+          chmod +x "package/$pkg/deploy/scripts/install.sh" "package/$pkg/deploy/cli/start-cli.sh"
 
           tar -C package -czf "dist/${pkg}.tar.gz" "$pkg"
 
@@ -88,11 +97,22 @@ jobs:
 
           $pkg = "openclaw-bridge-${{ matrix.goos }}-${{ matrix.goarch }}"
           New-Item -ItemType Directory -Path "package/$pkg" -Force | Out-Null
+          New-Item -ItemType Directory -Path "package/$pkg/deploy/systemd" -Force | Out-Null
+          New-Item -ItemType Directory -Path "package/$pkg/deploy/nginx" -Force | Out-Null
+          New-Item -ItemType Directory -Path "package/$pkg/deploy/scripts" -Force | Out-Null
+          New-Item -ItemType Directory -Path "package/$pkg/deploy/cli" -Force | Out-Null
           Copy-Item "dist/openclaw-relay${{ matrix.ext }}" "package/$pkg/"
           Copy-Item "dist/openclaw-connector${{ matrix.ext }}" "package/$pkg/"
           Copy-Item "dist/openclaw-cli${{ matrix.ext }}" "package/$pkg/"
           Copy-Item "README.md" "package/$pkg/"
           Copy-Item "LICENSE" "package/$pkg/"
+          Copy-Item "deploy/systemd/openclaw-bridge-relay.service" "package/$pkg/deploy/systemd/"
+          Copy-Item "deploy/systemd/openclaw-bridge-connector.service" "package/$pkg/deploy/systemd/"
+          Copy-Item "deploy/nginx/openclaw-bridge.conf" "package/$pkg/deploy/nginx/"
+          Copy-Item "deploy/install.sh" "package/$pkg/deploy/scripts/"
+          Copy-Item "deploy/cli/start-cli.sh" "package/$pkg/deploy/cli/"
+          Copy-Item "deploy/cli/start-cli.cmd" "package/$pkg/deploy/cli/"
+          Copy-Item "deploy/cli/start-cli.ps1" "package/$pkg/deploy/cli/"
 
           Compress-Archive -Path "package/$pkg/*" -DestinationPath "dist/$pkg.zip" -Force
 
