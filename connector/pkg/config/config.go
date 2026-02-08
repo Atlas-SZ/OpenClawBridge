@@ -116,13 +116,13 @@ func Load(path string) (Config, error) {
 		cfg.Gateway.ReconnectMaxSeconds = 30
 	}
 	if cfg.Gateway.SendMethod == "" {
-		cfg.Gateway.SendMethod = "send"
+		cfg.Gateway.SendMethod = "chat.send"
 	}
 	if cfg.Gateway.SendTo == "" {
 		cfg.Gateway.SendTo = "remote"
 	}
 	if cfg.Gateway.CancelMethod == "" {
-		cfg.Gateway.CancelMethod = "cancel"
+		cfg.Gateway.CancelMethod = "chat.abort"
 	}
 
 	return cfg, nil

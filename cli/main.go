@@ -54,6 +54,9 @@ func main() {
 	fmt.Println("enter text and press Enter (Ctrl+D to quit)")
 	for scanner.Scan() {
 		line := scanner.Text()
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
 		eventPayload, err := protocol.EncodeEvent(protocol.Event{Type: protocol.EventUserMessage, Content: line})
 		if err != nil {
 			log.Printf("encode event error=%v", err)

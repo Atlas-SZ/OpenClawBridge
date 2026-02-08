@@ -39,6 +39,10 @@ type Client struct {
 
 	reqMu        sync.RWMutex
 	reqToSession map[string]string
+
+	runMu        sync.RWMutex
+	runToSession map[string]string
+	runLastText  map[string]string
 }
 
 type envelope struct {
@@ -66,6 +70,8 @@ func New(cfg config.GatewayConfig, logger *log.Logger, handlers Handlers) *Clien
 		logger:       logger,
 		handlers:     handlers,
 		reqToSession: make(map[string]string),
+		runToSession: make(map[string]string),
+		runLastText:  make(map[string]string),
 	}
 }
 
@@ -113,7 +119,7 @@ func (c *Client) SendUserMessage(sessionID, content string) error {
 	reqID := newID("gw_req_")
 	c.trackRequest(reqID, sessionID)
 
-	params, err := c.buildSendParams(reqID, content)
+	params, err := c.buildSendParams(sessionID, reqID, content)
 	if err != nil {
 		c.untrackRequest(reqID)
 		return err
@@ -133,7 +139,15 @@ func (c *Client) SendUserMessage(sessionID, content string) error {
 	return nil
 }
 
-func (c *Client) buildSendParams(reqID, content string) (map[string]any, error) {
+func (c *Client) buildSendParams(sessionID, reqID, content string) (map[string]any, error) {
+	if isChatSendMethod(c.cfg.SendMethod) {
+		return map[string]any{
+			"sessionKey":     gatewaySessionKey(sessionID),
+			"message":        content,
+			"idempotencyKey": reqID,
+		}, nil
+	}
+
 	if requiresAddressedMessage(c.cfg.SendMethod) {
 		to := strings.TrimSpace(c.cfg.SendTo)
 		if to == "" {
@@ -155,11 +169,16 @@ func (c *Client) SendCancel(sessionID string) error {
 	reqID := newID("gw_cancel_")
 	c.trackRequest(reqID, sessionID)
 
+	params := map[string]any{}
+	if isChatAbortMethod(c.cfg.CancelMethod) {
+		params["sessionKey"] = gatewaySessionKey(sessionID)
+	}
+
 	msg := map[string]any{
 		"type":   "req",
 		"id":     reqID,
 		"method": c.cfg.CancelMethod,
-		"params": map[string]any{},
+		"params": params,
 	}
 
 	if err := c.writeJSON(msg); err != nil {
@@ -399,9 +418,11 @@ func (c *Client) handleResponse(env envelope) error {
 	}
 
 	if env.OK == nil || *env.OK {
-		if strings.HasPrefix(env.ID, "gw_cancel_") {
-			c.untrackRequest(env.ID)
+		runID := extractRunID(decodePayload(env.Payload))
+		if runID != "" {
+			c.trackRun(runID, sessionID)
 		}
+		c.untrackRequest(env.ID)
 		return nil
 	}
 
@@ -425,6 +446,11 @@ func (c *Client) handleEvent(env envelope) {
 	corrID := extractCorrelationID(env, payload)
 	sessionID := c.resolveSessionID(corrID, payload)
 
+	if isChatEventName(eventName) {
+		c.handleChatEvent(sessionID, corrID, payload)
+		return
+	}
+
 	switch {
 	case isTokenEventName(eventName):
 		content := extractContent(payload)
@@ -444,6 +470,62 @@ func (c *Client) handleEvent(env envelope) {
 		}
 	case isDisconnectEventName(eventName):
 		c.emitEvent(sessionID, protocol.Event{Type: protocol.EventError, Code: "GATEWAY_DISCONNECTED", Message: "gateway disconnected"})
+	}
+}
+
+func (c *Client) handleChatEvent(sessionID, runID string, payload map[string]any) {
+	state := strings.ToLower(stringValue(payload["state"]))
+	text := extractChatText(payload)
+
+	switch state {
+	case "delta":
+		if text != "" {
+			c.emitChatToken(sessionID, runID, text)
+		}
+	case "final", "done", "completed":
+		if text != "" {
+			c.emitChatToken(sessionID, runID, text)
+		}
+		c.emitEvent(sessionID, protocol.Event{Type: protocol.EventEnd})
+		if runID != "" {
+			c.clearRun(runID)
+		}
+	case "error":
+		c.emitEvent(sessionID, protocol.Event{Type: protocol.EventError, Code: "GATEWAY_EVENT_ERROR", Message: extractErrorMessageFromPayload(payload)})
+		if runID != "" {
+			c.clearRun(runID)
+		}
+	case "aborted", "cancelled", "canceled":
+		c.emitEvent(sessionID, protocol.Event{Type: protocol.EventEnd})
+		if runID != "" {
+			c.clearRun(runID)
+		}
+	default:
+		if text != "" {
+			c.emitChatToken(sessionID, runID, text)
+		}
+	}
+}
+
+func (c *Client) emitChatToken(sessionID, runID, text string) {
+	if runID == "" {
+		c.emitEvent(sessionID, protocol.Event{Type: protocol.EventToken, Content: text})
+		return
+	}
+
+	delta := text
+	prev := c.getRunLastText(runID)
+	if prev != "" {
+		if strings.HasPrefix(text, prev) {
+			delta = text[len(prev):]
+		} else if strings.HasPrefix(prev, text) {
+			delta = ""
+		}
+	}
+	c.setRunLastText(runID, text)
+
+	if delta != "" {
+		c.emitEvent(sessionID, protocol.Event{Type: protocol.EventToken, Content: delta})
 	}
 }
 
@@ -504,11 +586,46 @@ func (c *Client) resolveSessionID(corrID string, payload map[string]any) string 
 		if sid, ok := c.requestSession(corrID); ok {
 			return sid
 		}
+		if sid, ok := c.runSession(corrID); ok {
+			return sid
+		}
 	}
 
 	c.stateMu.RLock()
 	defer c.stateMu.RUnlock()
 	return c.lastSessionID
+}
+
+func (c *Client) trackRun(runID, sessionID string) {
+	c.runMu.Lock()
+	defer c.runMu.Unlock()
+	c.runToSession[runID] = sessionID
+}
+
+func (c *Client) runSession(runID string) (string, bool) {
+	c.runMu.RLock()
+	defer c.runMu.RUnlock()
+	sid, ok := c.runToSession[runID]
+	return sid, ok
+}
+
+func (c *Client) getRunLastText(runID string) string {
+	c.runMu.RLock()
+	defer c.runMu.RUnlock()
+	return c.runLastText[runID]
+}
+
+func (c *Client) setRunLastText(runID, text string) {
+	c.runMu.Lock()
+	defer c.runMu.Unlock()
+	c.runLastText[runID] = text
+}
+
+func (c *Client) clearRun(runID string) {
+	c.runMu.Lock()
+	defer c.runMu.Unlock()
+	delete(c.runToSession, runID)
+	delete(c.runLastText, runID)
 }
 
 func (c *Client) setConn(conn *websocket.Conn) {
@@ -582,8 +699,26 @@ func isConnectSchemaError(err error) bool {
 }
 
 func requiresAddressedMessage(method string) bool {
-	m := strings.ToLower(strings.TrimSpace(method))
-	return m == "send" || strings.HasSuffix(m, ".send")
+	m := normalizeMethod(method)
+	return (m == "send" || strings.HasSuffix(m, ".send")) && !isChatSendMethod(m)
+}
+
+func isChatSendMethod(method string) bool {
+	m := normalizeMethod(method)
+	return m == "chat.send" || strings.HasSuffix(m, ".chat.send")
+}
+
+func isChatAbortMethod(method string) bool {
+	m := normalizeMethod(method)
+	return m == "chat.abort" || strings.HasSuffix(m, ".chat.abort")
+}
+
+func normalizeMethod(method string) string {
+	return strings.ToLower(strings.TrimSpace(method))
+}
+
+func gatewaySessionKey(sessionID string) string {
+	return "bridge_" + sessionID
 }
 
 func decodePayload(raw json.RawMessage) map[string]any {
@@ -598,13 +733,22 @@ func decodePayload(raw json.RawMessage) map[string]any {
 }
 
 func extractCorrelationID(env envelope, payload map[string]any) string {
-	for _, key := range []string{"request_id", "requestId", "req_id", "reqId", "id"} {
+	for _, key := range []string{"run_id", "runId", "request_id", "requestId", "req_id", "reqId", "id"} {
 		if v := stringValue(payload[key]); v != "" {
 			return v
 		}
 	}
 	if env.ID != "" {
 		return env.ID
+	}
+	return ""
+}
+
+func extractRunID(payload map[string]any) string {
+	for _, key := range []string{"run_id", "runId"} {
+		if runID := stringValue(payload[key]); runID != "" {
+			return runID
+		}
 	}
 	return ""
 }
@@ -625,6 +769,44 @@ func extractContent(payload map[string]any) string {
 		}
 	}
 	return ""
+}
+
+func extractChatText(payload map[string]any) string {
+	if msgObj, ok := payload["message"].(map[string]any); ok {
+		if content := messageContentText(msgObj["content"]); content != "" {
+			return content
+		}
+	}
+	if content := messageContentText(payload["content"]); content != "" {
+		return content
+	}
+	return extractContent(payload)
+}
+
+func messageContentText(v any) string {
+	switch t := v.(type) {
+	case string:
+		return t
+	case []any:
+		var b strings.Builder
+		for _, item := range t {
+			part, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			if kind := normalizeMethod(stringValue(part["type"])); kind != "" && kind != "text" {
+				continue
+			}
+			text := stringValue(part["text"])
+			if text == "" {
+				text = stringValue(part["value"])
+			}
+			b.WriteString(text)
+		}
+		return b.String()
+	default:
+		return ""
+	}
 }
 
 func extractErrorMessage(env envelope) string {
@@ -671,6 +853,10 @@ func isErrorEventName(name string) bool {
 
 func isDisconnectEventName(name string) bool {
 	return strings.Contains(name, "disconnect")
+}
+
+func isChatEventName(name string) bool {
+	return name == "chat" || strings.HasSuffix(name, ".chat")
 }
 
 func stringValue(v any) string {

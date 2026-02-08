@@ -26,8 +26,8 @@
     "challenge_timeout_seconds": 8,
     "reconnect_initial_seconds": 1,
     "reconnect_max_seconds": 30,
-    "send_method": "send",
+    "send_method": "chat.send",
     "send_to": "remote",
-    "cancel_method": "cancel"
+    "cancel_method": "chat.abort"
   }
 }
