@@ -41,7 +41,7 @@ func main() {
 
 	scanner := bufio.NewScanner(os.Stdin)
 	fmt.Println("enter text and press Enter (Ctrl+D to quit)")
-	fmt.Println("tip: prefix with json: to send a full event payload (attachments/media fields)")
+	fmt.Println("tip: prefix with json: to send a full event payload (images field)")
 	for scanner.Scan() {
 		line := scanner.Text()
 		if strings.TrimSpace(line) == "" {
@@ -112,23 +112,6 @@ func main() {
 				switch ev.Type {
 				case protocol.EventToken:
 					fmt.Print(ev.Content)
-				case protocol.EventMedia:
-					fmt.Println()
-					for _, m := range ev.Media {
-						kind := m.Type
-						if kind == "" {
-							kind = "file"
-						}
-						if m.URL != "" {
-							fmt.Printf("[media] %s %s\n", kind, m.URL)
-							continue
-						}
-						if m.FileName != "" {
-							fmt.Printf("[media] %s %s\n", kind, m.FileName)
-							continue
-						}
-						fmt.Printf("[media] %s\n", kind)
-					}
 				case protocol.EventEnd:
 					fmt.Println()
 					goto nextInput

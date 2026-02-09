@@ -83,23 +83,12 @@ mkdir -p /etc/openclaw-bridge
 {
   "relay_url": "wss://YOUR_RELAY_DOMAIN/tunnel",
   "access_code": "A-123456",
-  "generation": 1,
-  "caps": { "e2ee": false },
-  "reconnect_seconds": 2,
   "gateway": {
     "url": "ws://127.0.0.1:18789",
     "auth": { "token": "YOUR_GATEWAY_TOKEN" },
-    "client": {
-      "id": "cli",
-      "displayName": "OpenClaw Bridge Connector",
-      "version": "0.1.0",
-      "platform": "linux",
-      "mode": "cli"
-    },
     "scopes": ["operator.read", "operator.write"],
-    "send_method": "agent",
-    "send_method_fallbacks": ["chat.send"],
-    "cancel_method": "chat.abort"
+    "min_protocol": 3,
+    "max_protocol": 3
   }
 }
 ```
@@ -117,7 +106,7 @@ go run ./cli -relay-url wss://YOUR_RELAY_DOMAIN/client -access-code A-123456 -re
 ```
 
 看到 `connected session=...` 后输入文本，能收到 `token/end` 即链路成功。
-CLI 也支持 `json:` 前缀发送完整事件（可用于附件/媒体字段测试）。
+CLI 也支持 `json:` 前缀发送完整事件（可用于 `images` 字段测试）。
 可选参数：
 - `-reconnect=true|false`（默认 `true`，断线自动重连）
 - `-reconnect-delay 2s`（重连间隔）
@@ -146,8 +135,8 @@ https://YOUR_RELAY_DOMAIN/
 页面支持：
 
 - 文本 `user_message`
-- 附件（浏览器内转 base64，走 `attachments` 字段）
-- Raw JSON 事件发送（便于调试富媒体字段）
+- 图片（浏览器内转 base64，走 `images` 字段）
+- Raw JSON 事件发送（便于调试 `images` 字段）
 
 ## Release 包内容
 
@@ -243,8 +232,8 @@ journalctl --user -u openclaw-gateway.service -n 80 --no-pager
 ## 常见问题（最小版）
 
 - `Gateway auth failed`：`gateway.auth.token` 与 Gateway 配置不一致。
-- `missing scope: operator.admin`：Connector 会自动尝试补 admin scope；若仍失败，说明 token 本身无该权限。
-- `unknown method ...` 或 `invalid send params ...`：打开方法回退，推荐 `send_method=agent` 且 `send_method_fallbacks=["chat.send"]`，由 Connector 自动兼容不同 Gateway 方法。
+- `missing scope ...`：检查 `gateway.scopes` 是否与 token 权限匹配（v2 不再自动 scope 回退）。
+- `unknown method ...`：当前 Connector 固定调用 `agent` 与 `chat.abort`，请确认 Gateway 版本支持。
 - `websocket: close 1009 (message too big)`：请求包超过 Nginx 或 Gateway 限制；请在 Nginx/Gateway 侧调整允许的消息大小。
 - 发送后长时间无返回：用 `-response-timeout` 防止 CLI 无限制等待，并查看 Connector/Gateway 日志。
 

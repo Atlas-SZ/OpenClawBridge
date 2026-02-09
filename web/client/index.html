@@ -254,12 +254,10 @@
             </label>
 
             <label>
-              Attachments (base64 will be generated in-browser)
-              <input id="fileInput" type="file" multiple />
+              Images (base64 will be generated in-browser)
+              <input id="fileInput" type="file" multiple accept="image/*" />
             </label>
-            <p class="hint">
-              Attachment size is not limited by this web client. Effective limits are defined by Nginx/Gateway.
-            </p>
+            <p class="hint">Only image files are accepted and sent through the `images` field.</p>
 
             <div class="buttons">
               <button id="sendBtn" class="primary">Send user_message</button>
@@ -470,10 +468,10 @@
 
       function summarizeEvent(event) {
         const clone = JSON.parse(JSON.stringify(event));
-        if (Array.isArray(clone.attachments)) {
-          clone.attachments = clone.attachments.map((a) => {
-            if (a && typeof a.content === "string") {
-              return { ...a, content: `<base64:${a.content.length}>` };
+        if (Array.isArray(clone.images)) {
+          clone.images = clone.images.map((a) => {
+            if (a && typeof a.data === "string") {
+              return { ...a, data: `<base64:${a.data.length}>` };
             }
             return a;
           });
@@ -515,14 +513,6 @@
           case "error":
             appendStream(`\n[error] ${event.code || ""} ${event.message || ""}\n`);
             break;
-          case "media":
-            if (Array.isArray(event.media)) {
-              for (const item of event.media) {
-                appendStream(`\n[media] ${item.type || "file"} ${item.url || item.fileName || ""}`);
-              }
-              appendStream("\n");
-            }
-            break;
           default:
             break;
         }
@@ -541,23 +531,16 @@
         });
       }
 
-      function mediaTypeFromMime(mime) {
-        if (!mime) return "file";
-        if (mime.startsWith("image/")) return "image";
-        if (mime.startsWith("audio/")) return "audio";
-        if (mime.startsWith("video/")) return "video";
-        return "file";
-      }
-
-      async function buildAttachments(files) {
+      async function buildImages(files) {
         const out = [];
         for (const f of files) {
+          if (!String(f.type || "").startsWith("image/")) {
+            continue;
+          }
           const content = await readFileAsBase64(f);
           out.push({
-            type: mediaTypeFromMime(f.type || ""),
+            data: content,
             mimeType: f.type || "application/octet-stream",
-            fileName: f.name,
-            content,
           });
         }
         return out;
@@ -581,13 +564,13 @@
 
       async function sendUserMessage() {
         try {
-          const attachments = await buildAttachments(fileInputEl.files || []);
+          const images = await buildImages(fileInputEl.files || []);
           const eventObj = {
             type: "user_message",
             content: messageInputEl.value,
           };
 
-          if (attachments.length) eventObj.attachments = attachments;
+          if (images.length) eventObj.images = images;
 
           await sendEvent(eventObj);
           logLine("sent user_message event");

@@ -37,24 +37,9 @@ type Client struct {
 	ready         bool
 	lastSessionID string
 
-	reqMu        sync.RWMutex
+	mapMu        sync.RWMutex
 	reqToSession map[string]string
-	reqToRun     map[string]string
-	runToReq     map[string]string
-
-	runMu        sync.RWMutex
 	runToSession map[string]string
-	runLastText  map[string]string
-
-	retryMu      sync.Mutex
-	reqFallbacks map[string]sendFallbackState
-}
-
-type sendFallbackState struct {
-	SessionID string
-	Event     protocol.Event
-	Methods   []string
-	Next      int
 }
 
 type envelope struct {
@@ -67,12 +52,6 @@ type envelope struct {
 	Error   *gatewayError   `json:"error,omitempty"`
 }
 
-type connectAttempt struct {
-	ClientID string
-	Mode     string
-	Scopes   []string
-}
-
 type gatewayError struct {
 	Message string `json:"message,omitempty"`
 }
@@ -82,12 +61,8 @@ func New(cfg config.GatewayConfig, logger *log.Logger, handlers Handlers) *Clien
 		cfg:          cfg,
 		logger:       logger,
 		handlers:     handlers,
-		reqToSession: make(map[string]string),
-		reqToRun:     make(map[string]string),
-		runToReq:     make(map[string]string),
-		runToSession: make(map[string]string),
-		runLastText:  make(map[string]string),
-		reqFallbacks: make(map[string]sendFallbackState),
+		reqToSession: map[string]string{},
+		runToSession: map[string]string{},
 	}
 }
 
@@ -131,190 +106,6 @@ func (c *Client) Run(ctx context.Context) error {
 	}
 }
 
-func (c *Client) SendUserMessage(sessionID string, event protocol.Event) error {
-	methods := c.buildSendMethodAttempts(event)
-	if len(methods) == 0 {
-		return errors.New("send method is empty")
-	}
-
-	var lastErr error
-	for idx, method := range methods {
-		reqID := newID("gw_req_")
-		params, err := c.buildSendParams(sessionID, reqID, method, event)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-
-		c.trackRequest(reqID, sessionID)
-		if idx+1 < len(methods) {
-			c.setFallback(reqID, sendFallbackState{
-				SessionID: sessionID,
-				Event:     event,
-				Methods:   methods,
-				Next:      idx + 1,
-			})
-		}
-
-		msg := map[string]any{
-			"type":   "req",
-			"id":     reqID,
-			"method": method,
-			"params": params,
-		}
-
-		if err := c.writeJSON(msg); err != nil {
-			c.untrackRequest(reqID)
-			lastErr = err
-			continue
-		}
-
-		if idx > 0 {
-			c.logger.Printf("gateway send method fallback selected method=%s", method)
-		}
-		return nil
-	}
-
-	if lastErr != nil {
-		return lastErr
-	}
-	return errors.New("unable to build gateway send request")
-}
-
-func (c *Client) buildSendParams(sessionID, reqID, method string, event protocol.Event) (map[string]any, error) {
-	content := strings.TrimSpace(event.Content)
-	attachments := normalizeAttachments(event.Attachments)
-
-	if isAgentMethod(method) {
-		if content == "" {
-			if len(attachments) > 0 {
-				content = "The image attachment is already included in this request. Analyze it directly and do not ask for file path or URL."
-			} else {
-				return nil, errors.New("content is required for agent method")
-			}
-		}
-		params := map[string]any{
-			"sessionKey":     gatewaySessionKey(sessionID),
-			"message":        content,
-			"idempotencyKey": reqID,
-		}
-		if len(attachments) > 0 {
-			fitted, changed, before, after, err := fitGatewayAttachments(method, reqID, params, attachments)
-			if err != nil {
-				return nil, err
-			}
-			if changed {
-				c.logger.Printf("gateway attachment auto-compressed method=%s bytes_before=%d bytes_after=%d", method, before, after)
-			}
-			params["attachments"] = fitted
-		}
-		return params, nil
-	}
-
-	if isChatSendMethod(method) {
-		if content == "" && len(attachments) == 0 {
-			return nil, errors.New("content or attachments is required for chat.send method")
-		}
-		params := map[string]any{
-			"sessionKey":     gatewaySessionKey(sessionID),
-			"message":        content,
-			"idempotencyKey": reqID,
-		}
-		if len(attachments) > 0 {
-			fitted, changed, before, after, err := fitGatewayAttachments(method, reqID, params, attachments)
-			if err != nil {
-				return nil, err
-			}
-			if changed {
-				c.logger.Printf("gateway attachment auto-compressed method=%s bytes_before=%d bytes_after=%d", method, before, after)
-			}
-			params["attachments"] = fitted
-		}
-		return params, nil
-	}
-
-	if requiresAddressedMessage(method) {
-		to := strings.TrimSpace(event.To)
-		if to == "" {
-			to = strings.TrimSpace(c.cfg.SendTo)
-		}
-		if to == "" {
-			to = "remote"
-		}
-		if content == "" {
-			return nil, errors.New("content is required for send method")
-		}
-
-		params := map[string]any{
-			"to":             to,
-			"message":        content,
-			"idempotencyKey": reqID,
-		}
-
-		mediaURLs := dedupeNonEmptyStrings(event.MediaURLs...)
-		attachmentURLs := mediaURLsFromAttachments(event.Attachments)
-		if len(attachmentURLs) > 0 {
-			mediaURLs = dedupeNonEmptyStrings(append(mediaURLs, attachmentURLs...)...)
-		}
-		if mediaURL := strings.TrimSpace(event.MediaURL); mediaURL != "" {
-			params["mediaUrl"] = mediaURL
-		}
-		if len(mediaURLs) > 0 {
-			params["mediaUrls"] = mediaURLs
-		}
-		if channel := strings.TrimSpace(event.Channel); channel != "" {
-			params["channel"] = channel
-		}
-		if accountID := strings.TrimSpace(event.AccountID); accountID != "" {
-			params["accountId"] = accountID
-		}
-		if sessionKey := strings.TrimSpace(event.SessionKey); sessionKey != "" {
-			params["sessionKey"] = sessionKey
-		}
-		if event.GifPlayback {
-			params["gifPlayback"] = true
-		}
-		return params, nil
-	}
-
-	if content == "" {
-		return nil, errors.New("content is required")
-	}
-
-	return map[string]any{
-		"content": content,
-	}, nil
-}
-
-func (c *Client) SendCancel(sessionID string) error {
-	reqID := newID("gw_cancel_")
-	c.trackRequest(reqID, sessionID)
-
-	params := map[string]any{}
-	if isChatAbortMethod(c.cfg.CancelMethod) {
-		params["sessionKey"] = gatewaySessionKey(sessionID)
-	}
-
-	msg := map[string]any{
-		"type":   "req",
-		"id":     reqID,
-		"method": c.cfg.CancelMethod,
-		"params": params,
-	}
-
-	if err := c.writeJSON(msg); err != nil {
-		c.untrackRequest(reqID)
-		return err
-	}
-	return nil
-}
-
-func (c *Client) IsReady() bool {
-	c.stateMu.RLock()
-	defer c.stateMu.RUnlock()
-	return c.ready
-}
-
 func (c *Client) connectAndServe(ctx context.Context) error {
 	conn, _, err := websocket.DefaultDialer.Dial(c.cfg.URL, nil)
 	if err != nil {
@@ -345,7 +136,7 @@ func (c *Client) connectAndServe(ctx context.Context) error {
 
 	_ = conn.SetReadDeadline(time.Time{})
 	c.setReady(true)
-	c.logger.Printf("gateway ready url=%s client_id=%s", c.cfg.URL, c.cfg.Client.ID)
+	c.logger.Printf("gateway ready url=%s client_id=%s", c.cfg.URL, gatewayClientID)
 	if c.handlers.OnReady != nil {
 		c.handlers.OnReady()
 	}
@@ -405,7 +196,7 @@ func (c *Client) waitForChallenge(conn *websocket.Conn) error {
 			return nil
 		}
 
-		if env.Type == "event" && isErrorEventName(env.Event) {
+		if env.Type == "event" && isErrorEventName(strings.ToLower(strings.TrimSpace(env.Event))) {
 			return fmt.Errorf("gateway challenge failed: %s", extractErrorMessage(env))
 		}
 
@@ -420,42 +211,6 @@ func (c *Client) waitForChallenge(conn *websocket.Conn) error {
 }
 
 func (c *Client) performConnect(conn *websocket.Conn) error {
-	attempts := c.buildConnectAttempts()
-	var lastErr error
-
-	for _, attempt := range attempts {
-		err := c.performConnectAttempt(conn, attempt)
-		if err == nil {
-			if attempt.ClientID != c.cfg.Client.ID || attempt.Mode != c.cfg.Client.Mode || !equalScopes(attempt.Scopes, c.cfg.Scopes) {
-				c.logger.Printf(
-					"gateway connect fallback accepted client_id=%s mode=%s scopes=%v (configured id=%s mode=%s scopes=%v)",
-					attempt.ClientID,
-					attempt.Mode,
-					attempt.Scopes,
-					c.cfg.Client.ID,
-					c.cfg.Client.Mode,
-					c.cfg.Scopes,
-				)
-			}
-			return nil
-		}
-		if errors.Is(err, ErrGatewayAuthFailed) {
-			return err
-		}
-		lastErr = err
-		if !isConnectSchemaError(err) && !isScopeError(err) {
-			return err
-		}
-		c.logger.Printf("gateway connect rejected client_id=%s mode=%s scopes=%v err=%v", attempt.ClientID, attempt.Mode, attempt.Scopes, err)
-	}
-
-	if lastErr != nil {
-		return lastErr
-	}
-	return errors.New("gateway connect failed: no attempts")
-}
-
-func (c *Client) performConnectAttempt(conn *websocket.Conn, attempt connectAttempt) error {
 	reqID := newID("gw_connect_")
 	connectReq := map[string]any{
 		"type":   "req",
@@ -468,14 +223,14 @@ func (c *Client) performConnectAttempt(conn *websocket.Conn, attempt connectAtte
 				"token": c.cfg.Auth.Token,
 			},
 			"client": map[string]any{
-				"id":          attempt.ClientID,
-				"displayName": c.cfg.Client.DisplayName,
-				"version":     c.cfg.Client.Version,
-				"platform":    c.cfg.Client.Platform,
-				"mode":        attempt.Mode,
+				"id":          gatewayClientID,
+				"displayName": gatewayClientDisplayName,
+				"version":     gatewayClientVersion,
+				"platform":    gatewayClientPlatform,
+				"mode":        gatewayClientMode,
 			},
 			"role":      "operator",
-			"scopes":    attempt.Scopes,
+			"scopes":    normalizeScopes(c.cfg.Scopes),
 			"caps":      []any{},
 			"locale":    c.cfg.Locale,
 			"userAgent": c.cfg.UserAgent,
@@ -520,7 +275,7 @@ func (c *Client) performConnectAttempt(conn *websocket.Conn, attempt connectAtte
 			return fmt.Errorf("gateway connect failed: %s", errMsg)
 		}
 
-		if env.Type == "event" && isErrorEventName(env.Event) {
+		if env.Type == "event" && isErrorEventName(strings.ToLower(strings.TrimSpace(env.Event))) {
 			errMsg := extractErrorMessage(env)
 			if isUnauthorized(errMsg) {
 				return fmt.Errorf("%w: %s", ErrGatewayAuthFailed, errMsg)
@@ -528,6 +283,63 @@ func (c *Client) performConnectAttempt(conn *websocket.Conn, attempt connectAtte
 			return fmt.Errorf("gateway connect event error: %s", errMsg)
 		}
 	}
+}
+
+func (c *Client) SendUserMessage(sessionID string, event protocol.Event) error {
+	content := strings.TrimSpace(event.Content)
+	if content == "" {
+		return errors.New("content is required")
+	}
+
+	reqID := newID("gw_req_")
+	params := map[string]any{
+		"sessionKey":     gatewaySessionKey(sessionID),
+		"message":        content,
+		"idempotencyKey": reqID,
+	}
+	if images := normalizeImages(event.Images); len(images) > 0 {
+		params["images"] = images
+	}
+
+	c.trackRequest(reqID, sessionID)
+	msg := map[string]any{
+		"type":   "req",
+		"id":     reqID,
+		"method": "agent",
+		"params": params,
+	}
+
+	if err := c.writeJSON(msg); err != nil {
+		c.untrackRequest(reqID)
+		return err
+	}
+	return nil
+}
+
+func (c *Client) SendCancel(sessionID string) error {
+	reqID := newID("gw_cancel_")
+	c.trackRequest(reqID, sessionID)
+
+	msg := map[string]any{
+		"type":   "req",
+		"id":     reqID,
+		"method": "chat.abort",
+		"params": map[string]any{
+			"sessionKey": gatewaySessionKey(sessionID),
+		},
+	}
+
+	if err := c.writeJSON(msg); err != nil {
+		c.untrackRequest(reqID)
+		return err
+	}
+	return nil
+}
+
+func (c *Client) IsReady() bool {
+	c.stateMu.RLock()
+	defer c.stateMu.RUnlock()
+	return c.ready
 }
 
 func (c *Client) handleResponse(env envelope) error {
@@ -540,286 +352,87 @@ func (c *Client) handleResponse(env envelope) error {
 		return nil
 	}
 
-	if env.OK == nil || *env.OK {
-		payload := decodePayload(env.Payload)
-		runID := extractRunID(payload)
-		if runID != "" {
-			c.trackRun(runID, sessionID)
-		}
-		if strings.HasPrefix(env.ID, "gw_req_") {
-			status := strings.ToLower(stringValue(payload["status"]))
-			if isPendingStatus(status) {
-				if runID != "" {
-					c.linkRequestRun(env.ID, runID)
-				}
-				return nil
-			}
+	payload := decodePayload(env.Payload)
+	if runID := extractRunID(payload); runID != "" {
+		c.trackRun(runID, sessionID)
+	}
 
-			if content := extractChatText(payload); content != "" {
+	if env.OK != nil && *env.OK {
+		status := strings.ToLower(strings.TrimSpace(stringValue(payload["status"])))
+		switch {
+		case isPendingStatus(status):
+			if content := extractContent(payload); content != "" {
 				c.emitEvent(sessionID, protocol.Event{Type: protocol.EventToken, Content: content})
 			}
-			c.emitMediaFromPayload(sessionID, payload)
-
-			if isErrorStatus(status) {
-				msg := extractErrorMessageFromPayload(payload)
-				if msg == "" || msg == "gateway event error" {
-					msg = "gateway request failed"
-				}
-				if c.trySendFallback(env.ID, msg) {
-					if runID != "" {
-						c.clearRun(runID)
-					}
-					return nil
-				}
-				c.emitEvent(sessionID, protocol.Event{
-					Type:    protocol.EventError,
-					Code:    "GATEWAY_REQUEST_FAILED",
-					Message: msg,
-				})
-				c.emitEvent(sessionID, protocol.Event{Type: protocol.EventEnd})
-				c.untrackRequest(env.ID)
-				if runID != "" {
-					c.clearRun(runID)
-				}
-				return nil
+		case isFinalStatus(status):
+			if content := extractContent(payload); content != "" {
+				c.emitEvent(sessionID, protocol.Event{Type: protocol.EventToken, Content: content})
 			}
-
-			if isFinalStatus(status) {
+			c.emitEvent(sessionID, protocol.Event{Type: protocol.EventEnd})
+			c.clearSessionTracks(sessionID)
+		case isErrorStatus(status):
+			c.emitEvent(sessionID, protocol.Event{
+				Type:    protocol.EventError,
+				Code:    "GATEWAY_REQUEST_FAILED",
+				Message: extractErrorMessageFromPayload(payload),
+			})
+			c.clearSessionTracks(sessionID)
+		default:
+			if content := extractContent(payload); content != "" {
+				c.emitEvent(sessionID, protocol.Event{Type: protocol.EventToken, Content: content})
 				c.emitEvent(sessionID, protocol.Event{Type: protocol.EventEnd})
-				c.untrackRequest(env.ID)
-				if runID != "" {
-					c.clearRun(runID)
-				}
-				return nil
-			}
-
-			if runID == "" {
-				c.emitEvent(sessionID, protocol.Event{
-					Type:    protocol.EventError,
-					Code:    "GATEWAY_NO_OUTPUT",
-					Message: "gateway accepted request but returned no output",
-				})
-				c.emitEvent(sessionID, protocol.Event{Type: protocol.EventEnd})
+				c.clearSessionTracks(sessionID)
 			}
 		}
-		c.untrackRequest(env.ID)
 		return nil
 	}
 
 	errMsg := extractErrorMessage(env)
-	if isUnauthorized(errMsg) {
-		return fmt.Errorf("%w: %s", ErrGatewayAuthFailed, errMsg)
-	}
-	if c.trySendFallback(env.ID, errMsg) {
-		return nil
-	}
-
 	c.emitEvent(sessionID, protocol.Event{Type: protocol.EventError, Code: "GATEWAY_REQUEST_FAILED", Message: errMsg})
-	c.untrackRequest(env.ID)
+	c.clearSessionTracks(sessionID)
 	return nil
 }
 
 func (c *Client) handleEvent(env envelope) {
-	eventName := strings.ToLower(env.Event)
-	if eventName == "" {
-		return
-	}
-
 	payload := decodePayload(env.Payload)
 	corrID := extractCorrelationID(env, payload)
-	sessionID := c.resolveSessionID(corrID, payload)
-
-	if isChatEventName(eventName) {
-		c.handleChatEvent(sessionID, corrID, payload)
-		return
-	}
-	if isAgentEventName(eventName) {
-		c.handleAgentEvent(sessionID, corrID, payload)
+	runID := extractRunID(payload)
+	sessionID := c.resolveSessionID(corrID, runID, payload)
+	if sessionID == "" {
 		return
 	}
 
-	switch {
-	case isTokenEventName(eventName):
-		content := extractContent(payload)
-		if content == "" {
-			return
-		}
-		c.emitEvent(sessionID, protocol.Event{Type: protocol.EventToken, Content: content})
-	case isDoneEventName(eventName):
-		c.emitMediaFromPayload(sessionID, payload)
-		c.emitEvent(sessionID, protocol.Event{Type: protocol.EventEnd})
-		if corrID != "" {
-			c.untrackRequest(corrID)
-		}
-	case isErrorEventName(eventName):
-		c.emitEvent(sessionID, protocol.Event{Type: protocol.EventError, Code: "GATEWAY_EVENT_ERROR", Message: extractErrorMessageFromPayload(payload)})
-		if corrID != "" {
-			c.untrackRequest(corrID)
-		}
-	case isDisconnectEventName(eventName):
-		c.emitEvent(sessionID, protocol.Event{Type: protocol.EventError, Code: "GATEWAY_DISCONNECTED", Message: "gateway disconnected"})
-	}
-}
-
-func (c *Client) handleChatEvent(sessionID, runID string, payload map[string]any) {
-	state := strings.ToLower(stringValue(payload["state"]))
-	text := extractChatText(payload)
-
-	switch state {
-	case "delta":
-		if text != "" {
-			c.emitChatToken(sessionID, runID, text)
-		}
-	case "final", "done", "completed":
-		if text != "" {
-			c.emitChatToken(sessionID, runID, text)
-		}
-		c.emitMediaFromPayload(sessionID, payload)
-		c.emitEvent(sessionID, protocol.Event{Type: protocol.EventEnd})
-		if runID != "" {
-			c.clearRun(runID)
-		}
-	case "error":
-		c.emitEvent(sessionID, protocol.Event{Type: protocol.EventError, Code: "GATEWAY_EVENT_ERROR", Message: extractErrorMessageFromPayload(payload)})
-		if runID != "" {
-			c.clearRun(runID)
-		}
-	case "aborted", "cancelled", "canceled":
-		c.emitEvent(sessionID, protocol.Event{Type: protocol.EventEnd})
-		if runID != "" {
-			c.clearRun(runID)
-		}
-	default:
-		if text != "" {
-			c.emitChatToken(sessionID, runID, text)
-			// Some gateway versions return single-shot chat events with no state/run id.
-			if runID == "" && state == "" {
-				c.emitMediaFromPayload(sessionID, payload)
-				c.emitEvent(sessionID, protocol.Event{Type: protocol.EventEnd})
-			}
+	events := mapGatewayEvent(sessionID, env)
+	for _, event := range events {
+		c.emitEvent(sessionID, event)
+		if event.Type == protocol.EventEnd || event.Type == protocol.EventError {
+			c.clearSessionTracks(sessionID)
 		}
 	}
 }
 
-func (c *Client) handleAgentEvent(sessionID, runID string, payload map[string]any) {
-	stream := strings.ToLower(stringValue(payload["stream"]))
-	state := strings.ToLower(stringValue(payload["state"]))
-	typ := strings.ToLower(stringValue(payload["type"]))
-
-	if stream == "assistant" || stream == "" {
-		if text := extractAgentText(payload); text != "" {
-			c.emitChatToken(sessionID, runID, text)
+func (c *Client) resolveSessionID(corrID, runID string, payload map[string]any) string {
+	if sid := extractSessionID(payload); sid != "" {
+		return sid
+	}
+	if corrID != "" {
+		if sid, ok := c.requestSession(corrID); ok {
+			return sid
 		}
 	}
-
-	terminal := state
-	if terminal == "" {
-		terminal = typ
-	}
-	switch terminal {
-	case "final", "done", "completed", "end", "ended", "finish", "finished":
-		c.emitMediaFromPayload(sessionID, payload)
-		c.emitEvent(sessionID, protocol.Event{Type: protocol.EventEnd})
-		if runID != "" {
-			c.clearRun(runID)
-		}
-	case "error", "failed":
-		c.emitEvent(sessionID, protocol.Event{
-			Type:    protocol.EventError,
-			Code:    "GATEWAY_EVENT_ERROR",
-			Message: extractErrorMessageFromPayload(payload),
-		})
-		if runID != "" {
-			c.clearRun(runID)
+	if runID != "" {
+		if sid, ok := c.runSession(runID); ok {
+			return sid
 		}
 	}
-}
-
-func (c *Client) emitChatToken(sessionID, runID, text string) {
-	if runID == "" {
-		c.emitEvent(sessionID, protocol.Event{Type: protocol.EventToken, Content: text})
-		return
-	}
-
-	delta := text
-	prev := c.getRunLastText(runID)
-	if prev != "" {
-		if strings.HasPrefix(text, prev) {
-			delta = text[len(prev):]
-		} else if strings.HasPrefix(prev, text) {
-			delta = ""
+	if corrID != "" {
+		if sid, ok := c.runSession(corrID); ok {
+			return sid
 		}
 	}
-	c.setRunLastText(runID, text)
-
-	if delta != "" {
-		c.emitEvent(sessionID, protocol.Event{Type: protocol.EventToken, Content: delta})
-	}
-}
-
-func (c *Client) emitEvent(sessionID string, event protocol.Event) {
-	if c.handlers.OnEvent == nil {
-		return
-	}
-	c.handlers.OnEvent(sessionID, event)
-}
-
-func (c *Client) emitMediaFromPayload(sessionID string, payload map[string]any) {
-	media := extractMediaItems(payload)
-	if len(media) == 0 {
-		return
-	}
-	c.emitEvent(sessionID, protocol.Event{Type: protocol.EventMedia, Media: media})
-}
-
-func (c *Client) trySendFallback(reqID, errMsg string) bool {
-	if !isSendMethodCompatError(errMsg) {
-		return false
-	}
-
-	state, ok := c.popFallback(reqID)
-	if !ok {
-		return false
-	}
-	c.untrackRequest(reqID)
-
-	for i := state.Next; i < len(state.Methods); i++ {
-		method := state.Methods[i]
-		newReqID := newID("gw_req_")
-
-		params, err := c.buildSendParams(state.SessionID, newReqID, method, state.Event)
-		if err != nil {
-			c.logger.Printf("gateway send fallback skip method=%s err=%v", method, err)
-			continue
-		}
-
-		c.trackRequest(newReqID, state.SessionID)
-		if i+1 < len(state.Methods) {
-			c.setFallback(newReqID, sendFallbackState{
-				SessionID: state.SessionID,
-				Event:     state.Event,
-				Methods:   state.Methods,
-				Next:      i + 1,
-			})
-		}
-
-		msg := map[string]any{
-			"type":   "req",
-			"id":     newReqID,
-			"method": method,
-			"params": params,
-		}
-		if err := c.writeJSON(msg); err != nil {
-			c.logger.Printf("gateway send fallback write failed method=%s err=%v", method, err)
-			c.untrackRequest(newReqID)
-			continue
-		}
-
-		c.logger.Printf("gateway send fallback accepted method=%s reason=%s", method, errMsg)
-		return true
-	}
-
-	return false
+	c.stateMu.RLock()
+	defer c.stateMu.RUnlock()
+	return c.lastSessionID
 }
 
 func (c *Client) writeJSON(v any) error {
@@ -842,8 +455,8 @@ func (c *Client) writeJSON(v any) error {
 }
 
 func (c *Client) trackRequest(reqID, sessionID string) {
-	c.reqMu.Lock()
-	defer c.reqMu.Unlock()
+	c.mapMu.Lock()
+	defer c.mapMu.Unlock()
 	c.reqToSession[reqID] = sessionID
 
 	c.stateMu.Lock()
@@ -851,115 +464,52 @@ func (c *Client) trackRequest(reqID, sessionID string) {
 	c.stateMu.Unlock()
 }
 
-func (c *Client) setFallback(reqID string, state sendFallbackState) {
-	c.retryMu.Lock()
-	defer c.retryMu.Unlock()
-	c.reqFallbacks[reqID] = state
-}
-
-func (c *Client) popFallback(reqID string) (sendFallbackState, bool) {
-	c.retryMu.Lock()
-	defer c.retryMu.Unlock()
-	state, ok := c.reqFallbacks[reqID]
-	if ok {
-		delete(c.reqFallbacks, reqID)
-	}
-	return state, ok
-}
-
-func (c *Client) clearFallback(reqID string) {
-	c.retryMu.Lock()
-	defer c.retryMu.Unlock()
-	delete(c.reqFallbacks, reqID)
+func (c *Client) untrackRequest(reqID string) {
+	c.mapMu.Lock()
+	defer c.mapMu.Unlock()
+	delete(c.reqToSession, reqID)
 }
 
 func (c *Client) requestSession(reqID string) (string, bool) {
-	c.reqMu.RLock()
-	defer c.reqMu.RUnlock()
-	sessionID, ok := c.reqToSession[reqID]
-	return sessionID, ok
-}
-
-func (c *Client) untrackRequest(reqID string) {
-	c.reqMu.Lock()
-	if runID, ok := c.reqToRun[reqID]; ok {
-		delete(c.reqToRun, reqID)
-		delete(c.runToReq, runID)
-	}
-	delete(c.reqToSession, reqID)
-	c.reqMu.Unlock()
-	c.clearFallback(reqID)
-}
-
-func (c *Client) resolveSessionID(corrID string, payload map[string]any) string {
-	if sid := extractSessionID(payload); sid != "" {
-		return sid
-	}
-	if corrID != "" {
-		if sid, ok := c.requestSession(corrID); ok {
-			return sid
-		}
-		if sid, ok := c.runSession(corrID); ok {
-			return sid
-		}
-	}
-
-	c.stateMu.RLock()
-	defer c.stateMu.RUnlock()
-	return c.lastSessionID
+	c.mapMu.RLock()
+	defer c.mapMu.RUnlock()
+	sid, ok := c.reqToSession[reqID]
+	return sid, ok
 }
 
 func (c *Client) trackRun(runID, sessionID string) {
-	c.runMu.Lock()
-	defer c.runMu.Unlock()
+	c.mapMu.Lock()
+	defer c.mapMu.Unlock()
 	c.runToSession[runID] = sessionID
 }
 
 func (c *Client) runSession(runID string) (string, bool) {
-	c.runMu.RLock()
-	defer c.runMu.RUnlock()
+	c.mapMu.RLock()
+	defer c.mapMu.RUnlock()
 	sid, ok := c.runToSession[runID]
 	return sid, ok
 }
 
-func (c *Client) getRunLastText(runID string) string {
-	c.runMu.RLock()
-	defer c.runMu.RUnlock()
-	return c.runLastText[runID]
-}
-
-func (c *Client) setRunLastText(runID, text string) {
-	c.runMu.Lock()
-	defer c.runMu.Unlock()
-	c.runLastText[runID] = text
-}
-
-func (c *Client) clearRun(runID string) {
-	var reqID string
-
-	c.reqMu.Lock()
-	if rid, ok := c.runToReq[runID]; ok {
-		reqID = rid
-		delete(c.runToReq, runID)
-		delete(c.reqToRun, rid)
-		delete(c.reqToSession, rid)
+func (c *Client) clearSessionTracks(sessionID string) {
+	c.mapMu.Lock()
+	defer c.mapMu.Unlock()
+	for reqID, sid := range c.reqToSession {
+		if sid == sessionID {
+			delete(c.reqToSession, reqID)
+		}
 	}
-	c.reqMu.Unlock()
-	if reqID != "" {
-		c.clearFallback(reqID)
+	for runID, sid := range c.runToSession {
+		if sid == sessionID {
+			delete(c.runToSession, runID)
+		}
 	}
-
-	c.runMu.Lock()
-	defer c.runMu.Unlock()
-	delete(c.runToSession, runID)
-	delete(c.runLastText, runID)
 }
 
-func (c *Client) linkRequestRun(reqID, runID string) {
-	c.reqMu.Lock()
-	defer c.reqMu.Unlock()
-	c.reqToRun[reqID] = runID
-	c.runToReq[runID] = reqID
+func (c *Client) emitEvent(sessionID string, event protocol.Event) {
+	if c.handlers.OnEvent == nil {
+		return
+	}
+	c.handlers.OnEvent(sessionID, event)
 }
 
 func (c *Client) setConn(conn *websocket.Conn) {
@@ -989,517 +539,20 @@ func (c *Client) setReady(ready bool) {
 	c.ready = ready
 }
 
-func (c *Client) buildSendMethodAttempts(event protocol.Event) []string {
-	primary := normalizeMethod(c.cfg.SendMethod)
-	if primary == "" {
-		primary = "agent"
-	}
-
-	candidates := []string{primary}
-	for _, m := range c.cfg.SendMethodFallbacks {
-		candidates = append(candidates, normalizeMethod(m))
-	}
-
-	switch {
-	case isAgentMethod(primary):
-		candidates = append(candidates, "chat.send")
-	case isChatSendMethod(primary):
-		candidates = append(candidates, "agent")
-	case requiresAddressedMessage(primary):
-		if !hasAddressingHints(event) {
-			candidates = append(candidates, "agent", "chat.send")
-		}
-	}
-
-	return dedupeMethods(candidates)
-}
-
-func (c *Client) buildConnectAttempts() []connectAttempt {
-	ids := uniqueNonEmpty(c.cfg.Client.ID, "cli", "bridge-connector")
-	modes := uniqueNonEmpty(c.cfg.Client.Mode, "operator", "cli", "desktop")
-	scopeAttempts := buildScopeAttempts(c.cfg.Scopes)
-
-	attempts := make([]connectAttempt, 0, len(ids)*len(modes)*len(scopeAttempts))
-	for _, id := range ids {
-		for _, mode := range modes {
-			for _, scopes := range scopeAttempts {
-				attempts = append(attempts, connectAttempt{
-					ClientID: id,
-					Mode:     mode,
-					Scopes:   scopes,
-				})
-			}
-		}
-	}
-	return attempts
-}
-
-func uniqueNonEmpty(values ...string) []string {
-	seen := make(map[string]struct{}, len(values))
-	result := make([]string, 0, len(values))
-	for _, v := range values {
-		if v == "" {
+func normalizeImages(images []protocol.ImageItem) []map[string]any {
+	out := make([]map[string]any, 0, len(images))
+	for _, item := range images {
+		data := strings.TrimSpace(item.Data)
+		if data == "" {
 			continue
 		}
-		if _, ok := seen[v]; ok {
-			continue
+		m := map[string]any{"data": data}
+		if mimeType := strings.TrimSpace(item.MimeType); mimeType != "" {
+			m["mimeType"] = mimeType
 		}
-		seen[v] = struct{}{}
-		result = append(result, v)
-	}
-	return result
-}
-
-func buildScopeAttempts(base []string) [][]string {
-	primary := dedupeNonEmptyScopes(base)
-	if len(primary) == 0 {
-		primary = []string{"operator.read", "operator.write"}
-	}
-
-	withAdmin := append(dedupeNonEmptyScopes(primary), "operator.admin")
-	withAdmin = dedupeNonEmptyScopes(withAdmin)
-
-	if equalScopes(primary, withAdmin) {
-		return [][]string{primary}
-	}
-	return [][]string{withAdmin, primary}
-}
-
-func dedupeNonEmptyScopes(scopes []string) []string {
-	seen := map[string]struct{}{}
-	out := make([]string, 0, len(scopes))
-	for _, s := range scopes {
-		s = strings.TrimSpace(s)
-		if s == "" {
-			continue
-		}
-		if _, ok := seen[s]; ok {
-			continue
-		}
-		seen[s] = struct{}{}
-		out = append(out, s)
+		out = append(out, m)
 	}
 	return out
-}
-
-func equalScopes(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}
-
-func normalizeAttachments(items []protocol.MediaItem) []map[string]any {
-	out := make([]map[string]any, 0, len(items))
-	for _, item := range items {
-		content := strings.TrimSpace(item.Content)
-		if content == "" {
-			continue
-		}
-		att := map[string]any{
-			"content": content,
-		}
-		if typ := strings.TrimSpace(item.Type); typ != "" {
-			att["type"] = typ
-		}
-		if mime := strings.TrimSpace(item.MimeType); mime != "" {
-			att["mimeType"] = mime
-		}
-		if fileName := strings.TrimSpace(item.FileName); fileName != "" {
-			att["fileName"] = fileName
-		}
-		out = append(out, att)
-	}
-	return out
-}
-
-func mediaURLsFromAttachments(items []protocol.MediaItem) []string {
-	urls := make([]string, 0, len(items))
-	for _, item := range items {
-		if u := strings.TrimSpace(item.URL); u != "" {
-			urls = append(urls, u)
-		}
-	}
-	return dedupeNonEmptyStrings(urls...)
-}
-
-func dedupeNonEmptyStrings(values ...string) []string {
-	seen := make(map[string]struct{}, len(values))
-	out := make([]string, 0, len(values))
-	for _, v := range values {
-		v = strings.TrimSpace(v)
-		if v == "" {
-			continue
-		}
-		if _, ok := seen[v]; ok {
-			continue
-		}
-		seen[v] = struct{}{}
-		out = append(out, v)
-	}
-	return out
-}
-
-func dedupeMethods(values []string) []string {
-	seen := make(map[string]struct{}, len(values))
-	out := make([]string, 0, len(values))
-	for _, v := range values {
-		v = normalizeMethod(v)
-		if v == "" {
-			continue
-		}
-		if _, ok := seen[v]; ok {
-			continue
-		}
-		seen[v] = struct{}{}
-		out = append(out, v)
-	}
-	return out
-}
-
-func hasAddressingHints(event protocol.Event) bool {
-	if strings.TrimSpace(event.To) != "" ||
-		strings.TrimSpace(event.Channel) != "" ||
-		strings.TrimSpace(event.AccountID) != "" ||
-		strings.TrimSpace(event.SessionKey) != "" ||
-		strings.TrimSpace(event.MediaURL) != "" {
-		return true
-	}
-	for _, u := range event.MediaURLs {
-		if strings.TrimSpace(u) != "" {
-			return true
-		}
-	}
-	for _, item := range event.Attachments {
-		if strings.TrimSpace(item.URL) != "" {
-			return true
-		}
-	}
-	return false
-}
-
-func isConnectSchemaError(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "/client/id") ||
-		strings.Contains(msg, "client/id") ||
-		strings.Contains(msg, "/client/mode") ||
-		strings.Contains(msg, "client/mode")
-}
-
-func isScopeError(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "missing scope")
-}
-
-func isSendMethodCompatError(msg string) bool {
-	lower := strings.ToLower(strings.TrimSpace(msg))
-	if lower == "" {
-		return false
-	}
-	return strings.Contains(lower, "unknown method") ||
-		strings.Contains(lower, "invalid send params") ||
-		strings.Contains(lower, "invalid params") ||
-		strings.Contains(lower, "unexpected property") ||
-		strings.Contains(lower, "must have required property") ||
-		strings.Contains(lower, "delivering to whatsapp requires target") ||
-		strings.Contains(lower, "content is required for agent method")
-}
-
-func requiresAddressedMessage(method string) bool {
-	m := normalizeMethod(method)
-	return (m == "send" || strings.HasSuffix(m, ".send")) && !isChatSendMethod(m)
-}
-
-func isChatSendMethod(method string) bool {
-	m := normalizeMethod(method)
-	return m == "chat.send" || strings.HasSuffix(m, ".chat.send")
-}
-
-func isAgentMethod(method string) bool {
-	m := normalizeMethod(method)
-	return m == "agent" || strings.HasSuffix(m, ".agent")
-}
-
-func isChatAbortMethod(method string) bool {
-	m := normalizeMethod(method)
-	return m == "chat.abort" || strings.HasSuffix(m, ".chat.abort")
-}
-
-func normalizeMethod(method string) string {
-	return strings.ToLower(strings.TrimSpace(method))
-}
-
-func gatewaySessionKey(sessionID string) string {
-	return "bridge_" + sessionID
-}
-
-func decodePayload(raw json.RawMessage) map[string]any {
-	if len(raw) == 0 {
-		return map[string]any{}
-	}
-	var payload map[string]any
-	if err := json.Unmarshal(raw, &payload); err != nil {
-		return map[string]any{}
-	}
-	return payload
-}
-
-func extractCorrelationID(env envelope, payload map[string]any) string {
-	for _, key := range []string{"run_id", "runId", "request_id", "requestId", "req_id", "reqId", "id"} {
-		if v := stringValue(payload[key]); v != "" {
-			return v
-		}
-	}
-	if env.ID != "" {
-		return env.ID
-	}
-	return ""
-}
-
-func extractRunID(payload map[string]any) string {
-	for _, key := range []string{"run_id", "runId"} {
-		if runID := stringValue(payload[key]); runID != "" {
-			return runID
-		}
-	}
-	if runObj, ok := payload["run"].(map[string]any); ok {
-		for _, key := range []string{"id", "run_id", "runId"} {
-			if runID := stringValue(runObj[key]); runID != "" {
-				return runID
-			}
-		}
-	}
-	for _, key := range []string{"response", "result", "data", "output"} {
-		if nested, ok := payload[key].(map[string]any); ok {
-			if runID := extractRunID(nested); runID != "" {
-				return runID
-			}
-		}
-	}
-	return ""
-}
-
-func extractSessionID(payload map[string]any) string {
-	for _, key := range []string{"session_id", "sessionId", "sid"} {
-		if sid := stringValue(payload[key]); sid != "" {
-			return sid
-		}
-	}
-	return ""
-}
-
-func extractContent(payload map[string]any) string {
-	for _, key := range []string{"content", "text", "token", "chunk", "delta"} {
-		if content := stringValue(payload[key]); content != "" {
-			return content
-		}
-	}
-	return ""
-}
-
-func extractChatText(payload map[string]any) string {
-	for _, key := range []string{"response", "result", "data", "output"} {
-		if nested, ok := payload[key].(map[string]any); ok {
-			if content := extractChatText(nested); content != "" {
-				return content
-			}
-		}
-	}
-
-	if msgObj, ok := payload["message"].(map[string]any); ok {
-		if content := messageContentText(msgObj["content"]); content != "" {
-			return content
-		}
-	}
-	if content := messageContentText(payload["content"]); content != "" {
-		return content
-	}
-	return extractContent(payload)
-}
-
-func extractAgentText(payload map[string]any) string {
-	for _, key := range []string{"delta", "text", "content", "message"} {
-		if msgObj, ok := payload[key].(map[string]any); ok {
-			if content := extractChatText(msgObj); content != "" {
-				return content
-			}
-		}
-	}
-	if content := extractChatText(payload); content != "" {
-		return content
-	}
-	return ""
-}
-
-func extractMediaItems(payload map[string]any) []protocol.MediaItem {
-	out := make([]protocol.MediaItem, 0, 2)
-	seen := map[string]struct{}{}
-	collectMediaFromAny(payload, "", &out, seen, 0)
-	return out
-}
-
-func collectMediaFromAny(v any, hintedType string, out *[]protocol.MediaItem, seen map[string]struct{}, depth int) {
-	if depth > 6 || v == nil {
-		return
-	}
-
-	switch t := v.(type) {
-	case map[string]any:
-		typ := normalizeMediaType(stringValue(t["type"]))
-		if typ == "" {
-			typ = hintedType
-		}
-		mime := strings.TrimSpace(stringValue(t["mimeType"]))
-		if mime == "" {
-			mime = strings.TrimSpace(stringValue(t["mime_type"]))
-		}
-		fileName := strings.TrimSpace(stringValue(t["fileName"]))
-		if fileName == "" {
-			fileName = strings.TrimSpace(stringValue(t["name"]))
-		}
-
-		for _, key := range []string{"url", "uri", "src", "imageUrl", "fileUrl", "mediaUrl"} {
-			if u := strings.TrimSpace(stringValue(t[key])); u != "" {
-				addMediaItem(out, seen, protocol.MediaItem{
-					Type:     typ,
-					URL:      u,
-					MimeType: mime,
-					FileName: fileName,
-				})
-			}
-		}
-		for _, key := range []string{"mediaUrls", "urls"} {
-			if arr, ok := t[key].([]any); ok {
-				for _, item := range arr {
-					if u := strings.TrimSpace(stringValue(item)); u != "" {
-						addMediaItem(out, seen, protocol.MediaItem{
-							Type:     typ,
-							URL:      u,
-							MimeType: mime,
-							FileName: fileName,
-						})
-					}
-				}
-			}
-		}
-
-		if content := strings.TrimSpace(stringValue(t["content"])); content != "" && typ != "" {
-			addMediaItem(out, seen, protocol.MediaItem{
-				Type:     typ,
-				Content:  content,
-				MimeType: mime,
-				FileName: fileName,
-			})
-		}
-		if data := strings.TrimSpace(stringValue(t["data"])); data != "" && typ != "" {
-			addMediaItem(out, seen, protocol.MediaItem{
-				Type:     typ,
-				Content:  data,
-				MimeType: mime,
-				FileName: fileName,
-			})
-		}
-
-		for _, key := range []string{"message", "content", "attachments", "media", "source", "data", "output", "result", "response", "payload"} {
-			if nested, ok := t[key]; ok {
-				collectMediaFromAny(nested, typ, out, seen, depth+1)
-			}
-		}
-	case []any:
-		for _, item := range t {
-			collectMediaFromAny(item, hintedType, out, seen, depth+1)
-		}
-	}
-}
-
-func addMediaItem(out *[]protocol.MediaItem, seen map[string]struct{}, item protocol.MediaItem) {
-	if strings.TrimSpace(item.URL) == "" && strings.TrimSpace(item.Content) == "" {
-		return
-	}
-	key := strings.ToLower(strings.TrimSpace(item.Type)) + "|" + strings.TrimSpace(item.URL) + "|" + strings.TrimSpace(item.Content)
-	if _, ok := seen[key]; ok {
-		return
-	}
-	seen[key] = struct{}{}
-	*out = append(*out, item)
-}
-
-func normalizeMediaType(v string) string {
-	v = strings.ToLower(strings.TrimSpace(v))
-	switch {
-	case strings.Contains(v, "image"):
-		return "image"
-	case strings.Contains(v, "audio"):
-		return "audio"
-	case strings.Contains(v, "video"):
-		return "video"
-	case strings.Contains(v, "file"), strings.Contains(v, "document"), strings.Contains(v, "attachment"):
-		return "file"
-	default:
-		return ""
-	}
-}
-
-func messageContentText(v any) string {
-	switch t := v.(type) {
-	case string:
-		return t
-	case []any:
-		var b strings.Builder
-		for _, item := range t {
-			part, ok := item.(map[string]any)
-			if !ok {
-				continue
-			}
-			if kind := normalizeMethod(stringValue(part["type"])); kind != "" && kind != "text" {
-				continue
-			}
-			text := stringValue(part["text"])
-			if text == "" {
-				text = stringValue(part["value"])
-			}
-			b.WriteString(text)
-		}
-		return b.String()
-	default:
-		return ""
-	}
-}
-
-func extractErrorMessage(env envelope) string {
-	if env.Error != nil && env.Error.Message != "" {
-		return env.Error.Message
-	}
-	payload := decodePayload(env.Payload)
-	if msg := extractErrorMessageFromPayload(payload); msg != "" {
-		return msg
-	}
-	return "unknown error"
-}
-
-func extractErrorMessageFromPayload(payload map[string]any) string {
-	if errObj, ok := payload["error"].(map[string]any); ok {
-		if msg := stringValue(errObj["message"]); msg != "" {
-			return msg
-		}
-	}
-	for _, key := range []string{"message", "msg", "reason"} {
-		if msg := stringValue(payload[key]); msg != "" {
-			return msg
-		}
-	}
-	return "gateway event error"
 }
 
 func isUnauthorized(msg string) bool {
@@ -1507,28 +560,8 @@ func isUnauthorized(msg string) bool {
 	return strings.Contains(lower, "unauthorized") || strings.Contains(lower, "forbidden")
 }
 
-func isTokenEventName(name string) bool {
-	return strings.Contains(name, "token") || strings.Contains(name, "chunk")
-}
-
-func isDoneEventName(name string) bool {
-	return strings.Contains(name, "completed") || strings.Contains(name, "done") || strings.HasSuffix(name, ".end")
-}
-
-func isErrorEventName(name string) bool {
-	return strings.Contains(name, "error")
-}
-
-func isDisconnectEventName(name string) bool {
-	return strings.Contains(name, "disconnect")
-}
-
-func isChatEventName(name string) bool {
-	return strings.Contains(name, "chat")
-}
-
-func isAgentEventName(name string) bool {
-	return strings.Contains(name, "agent")
+func gatewaySessionKey(sessionID string) string {
+	return "bridge_" + sessionID
 }
 
 func stringValue(v any) string {
@@ -1546,31 +579,4 @@ func stringValue(v any) string {
 
 func newID(prefix string) string {
 	return fmt.Sprintf("%s%d", prefix, time.Now().UnixNano())
-}
-
-func isPendingStatus(status string) bool {
-	switch status {
-	case "accepted", "queued", "started", "running", "in_flight", "inflight", "pending":
-		return true
-	default:
-		return false
-	}
-}
-
-func isFinalStatus(status string) bool {
-	switch status {
-	case "ok", "done", "completed", "final", "ended", "end", "aborted", "cancelled", "canceled":
-		return true
-	default:
-		return false
-	}
-}
-
-func isErrorStatus(status string) bool {
-	switch status {
-	case "error", "failed":
-		return true
-	default:
-		return false
-	}
 }

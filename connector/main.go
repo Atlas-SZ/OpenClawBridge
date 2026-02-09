@@ -66,11 +66,10 @@ func main() {
 	bridgeHandler.BindGateway(gateway)
 
 	logger.Printf(
-		"start relay_url=%s access_code_hash=%s gateway_url=%s gateway_client_id=%s",
+		"start relay_url=%s access_code_hash=%s gateway_url=%s",
 		cfg.RelayURL,
 		cfg.AccessCodeHash,
 		cfg.Gateway.URL,
-		cfg.Gateway.Client.ID,
 	)
 
 	errCh := make(chan error, 2)

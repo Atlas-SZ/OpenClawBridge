@@ -1,4 +1,4 @@
-# openclaw-bridge v0.1 Protocol
+# openclaw-bridge v2 Protocol
 
 ## Scope
 - Transport: WebSocket only.
@@ -10,7 +10,7 @@
 - `GET /client` for CLI/Client.
 
 ## Control Messages (JSON text frame)
-All control messages use `v=1`.
+Control plane remains backward-compatible (`v=1`).
 
 ### REGISTER (Connector -> Relay)
 ```json
@@ -70,22 +70,15 @@ Uses JSON event payload. Relay never parses this JSON.
 {"type":"user_message","content":"hello"}
 ```
 
-Rich media fields (optional on `user_message`):
+User message with images:
 
 ```json
 {
-  "type":"user_message",
-  "content":"describe this image",
-  "attachments":[
-    {"type":"image","mimeType":"image/png","fileName":"pic.png","content":"<base64>"}
-  ],
-  "to":"+15551234567",
-  "channel":"whatsapp",
-  "accountId":"acc_main",
-  "sessionKey":"bridge_s_xxx",
-  "mediaUrl":"https://example.com/a.png",
-  "mediaUrls":["https://example.com/a.png","https://example.com/b.jpg"],
-  "gifPlayback":true
+  "type": "user_message",
+  "content": "describe this image",
+  "images": [
+    {"data": "iVBORw0KG...", "mimeType": "image/png"}
+  ]
 }
 ```
 
@@ -109,39 +102,25 @@ Rich media fields (optional on `user_message`):
 {"type":"error","code":"...","message":"..."}
 ```
 
-### media (Connector -> Client)
-```json
-{"type":"media","media":[{"type":"image","url":"https://...","mimeType":"image/png","fileName":"a.png"}]}
-```
-
-## Connector <-> Gateway Mapping (Phase 2)
-- Connector waits for `connect.challenge`, then sends `connect` as `role=operator`.
-- Connector prefers scopes including `operator.admin`; if rejected, connector retries without `operator.admin`.
-- `user_message` -> Gateway request (`gateway.send_method`, default `agent`).
-  - If method is `agent`/`*.agent`, params are:
-    - `sessionKey` generated from bridge `session_id`
-    - `message` from event `content`
-    - `idempotencyKey` generated per request
-    - `attachments` from event `attachments` (base64 content)
-  - If method is `chat.send`/`*.chat.send`, params are:
-    - `sessionKey` generated from bridge `session_id`
-    - `message` from event `content`
-    - `idempotencyKey` generated per request
-    - `attachments` from event `attachments` (base64 content)
-  - If method is `send`/`*.send`, params are:
-    - `to` from event `to`, fallback `gateway.send_to` (default `remote`)
-    - `message` from event `content`
-    - `idempotencyKey` generated per request
-    - optional `mediaUrl`/`mediaUrls`/`channel`/`accountId`/`sessionKey`/`gifPlayback`
-- `control.stop` -> Gateway request (`gateway.cancel_method`, default `chat.abort`).
+## Connector <-> Gateway Mapping (v2 simplified)
+- Connector waits for `connect.challenge`, then sends `connect` with fixed operator client metadata.
+- `user_message` -> `agent` request:
+  - `message` from event `content`
+  - `images` from event `images`
+  - `sessionKey` from bridge `session_id`
+  - `idempotencyKey` generated per request
+- `control.stop` -> `chat.abort` request.
 - Gateway `token/chunk` events -> `token`.
 - Gateway `completed/done` events -> `end`.
 - Gateway `error/disconnect` events -> `error`.
-- Gateway events with media payloads (url/base64 blocks) -> `media`.
-- Connector also maps `agent` stream events (`assistant/lifecycle`) to `token/end/error` for compatibility.
 
 ## Session Rules
 - Client sends CONNECT with access code.
 - Relay hashes access code with SHA-256 and matches connector `access_code_hash`.
 - Relay creates `session_id`, stores session map, sends CONNECT_OK and SESSION_OPEN.
 - Close/session disconnect removes session map and informs peer with CLOSE_SESSION.
+
+## Breaking Changes (from v1)
+- Removed request fields: `attachments`, `to`, `channel`, `accountId`, `sessionKey`, `mediaUrl`, `mediaUrls`, `gifPlayback`.
+- Removed response event: `media`.
+- Connector no longer performs send-method fallback (`agent -> chat.send -> send`); it always uses `agent`.

@@ -54,7 +54,7 @@ func (c *Client) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			c.closeConn()
 			return nil
-		case <-time.After(time.Duration(c.cfg.ReconnectSeconds) * time.Second):
+		case <-time.After(2 * time.Second):
 		}
 	}
 }
@@ -78,8 +78,8 @@ func (c *Client) connectAndServe(ctx context.Context) error {
 	if err := c.SendControl(protocol.ControlMessage{
 		Type:           protocol.TypeRegister,
 		AccessCodeHash: c.cfg.AccessCodeHash,
-		Generation:     c.cfg.Generation,
-		Caps:           &c.cfg.Caps,
+		Generation:     1,
+		Caps:           &protocol.Caps{E2EE: false},
 	}); err != nil {
 		c.closeConn()
 		return err

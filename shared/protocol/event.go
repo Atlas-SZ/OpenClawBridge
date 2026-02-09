@@ -10,32 +10,20 @@ const (
 	EventToken       = "token"
 	EventEnd         = "end"
 	EventError       = "error"
-	EventMedia       = "media"
 )
 
-type MediaItem struct {
-	Type     string `json:"type,omitempty"`
-	URL      string `json:"url,omitempty"`
+type ImageItem struct {
+	Data     string `json:"data,omitempty"`
 	MimeType string `json:"mimeType,omitempty"`
-	FileName string `json:"fileName,omitempty"`
-	Content  string `json:"content,omitempty"`
 }
 
 type Event struct {
-	Type        string      `json:"type"`
-	Content     string      `json:"content,omitempty"`
-	Action      string      `json:"action,omitempty"`
-	Code        string      `json:"code,omitempty"`
-	Message     string      `json:"message,omitempty"`
-	Attachments []MediaItem `json:"attachments,omitempty"`
-	Media       []MediaItem `json:"media,omitempty"`
-	To          string      `json:"to,omitempty"`
-	Channel     string      `json:"channel,omitempty"`
-	AccountID   string      `json:"accountId,omitempty"`
-	SessionKey  string      `json:"sessionKey,omitempty"`
-	MediaURL    string      `json:"mediaUrl,omitempty"`
-	MediaURLs   []string    `json:"mediaUrls,omitempty"`
-	GifPlayback bool        `json:"gifPlayback,omitempty"`
+	Type    string      `json:"type"`
+	Content string      `json:"content,omitempty"`
+	Images  []ImageItem `json:"images,omitempty"`
+	Action  string      `json:"action,omitempty"`
+	Code    string      `json:"code,omitempty"`
+	Message string      `json:"message,omitempty"`
 }
 
 func EncodeEvent(event Event) ([]byte, error) {
